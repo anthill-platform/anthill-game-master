@@ -49,6 +49,9 @@ class GameMasterServer(common.server.Server):
             "create_room": options.rate_create_room
         })
 
+    def get_models(self):
+        return [self.servers, self.rooms, self.games]
+
     def get_admin(self):
         return {
             "index": admin.RootAdminController,

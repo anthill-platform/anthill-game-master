@@ -1,6 +1,7 @@
 
 from tornado.gen import coroutine, Return
 import common.database
+from common.model import Model
 
 
 class ServerError(Exception):
@@ -11,9 +12,15 @@ class ServerNotFound(Exception):
     pass
 
 
-class ServersModel(object):
+class ServersModel(Model):
     def __init__(self, db):
         self.db = db
+
+    def get_setup_db(self):
+        return self.db
+
+    def get_setup_tables(self):
+        return ["servers"]
 
     @coroutine
     def new_server(self, internal_location):

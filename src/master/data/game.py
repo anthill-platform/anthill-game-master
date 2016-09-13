@@ -1,6 +1,8 @@
 
 from tornado.gen import coroutine, Return
 
+from common.model import Model
+
 import common.database
 import json
 
@@ -21,9 +23,15 @@ class GameVersionNotFound(Exception):
     pass
 
 
-class GamesModel(object):
+class GamesModel(Model):
     def __init__(self, db):
         self.db = db
+
+    def get_setup_db(self):
+        return self.db
+
+    def get_setup_tables(self):
+        return ["games", "game_versions"]
 
     @coroutine
     def delete_game_version(self, gamespace_id, game_id, game_version):

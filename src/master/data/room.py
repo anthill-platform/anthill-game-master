@@ -2,6 +2,7 @@
 import ujson
 import logging
 
+from common.model import Model
 from tornado.gen import coroutine, Return
 
 import common.database
@@ -20,7 +21,7 @@ class RoomNotFound(Exception):
     pass
 
 
-class RoomsModel(object):
+class RoomsModel(Model):
     @coroutine
     def __inc_players_num__(self, room_id, db):
         yield db.execute(
@@ -30,6 +31,12 @@ class RoomsModel(object):
             WHERE `room_id`=%s
             """, room_id
         )
+
+    def get_setup_db(self):
+        return self.db
+
+    def get_setup_tables(self):
+        return ["rooms", "players"]
 
     def __init__(self, db):
         self.db = db
@@ -55,6 +62,7 @@ class RoomsModel(object):
             WHERE `room_id`=%s
             """, room_id
         )
+
     @coroutine
     def approve_join(self, gamespace, room_id, key):
 
