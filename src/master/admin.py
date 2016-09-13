@@ -5,7 +5,7 @@ from tornado.gen import coroutine, Return
 import common.admin as a
 from common.environment import AppNotFound
 
-from data.game import GameError, GameNotFound, GameVersionNotFound
+from data.game import GameError, GameNotFound, GameVersionNotFound, GamesModel
 from data.server import ServerNotFound
 
 
@@ -79,7 +79,7 @@ class ApplicationSettingsController(a.AdminController):
             "settings": game.get("settings", {}),
             "default_settings": game.get("default_settings", {}),
             "server_host": game.get("server_host", ""),
-            "schema": game.get("schema", {})
+            "schema": game.get("schema", GamesModel.DEFAULT_SCHEME)
         }
 
         raise a.Return(result)

@@ -24,6 +24,26 @@ class GameVersionNotFound(Exception):
 
 
 class GamesModel(Model):
+
+    DEFAULT_SCHEME = {
+        "type": "object",
+        "properties": {
+            "binary": {
+                "type": "string",
+                "title": "Appliction Binary"
+            },
+            "arguments": {
+                "items": {
+                    "type": "string"
+                },
+                "title": "Application Command Line Arguments",
+                "type": "array",
+                "format": "table"
+            }
+        },
+        "title": "Application Version Configuration"
+    }
+
     def __init__(self, db):
         self.db = db
 
