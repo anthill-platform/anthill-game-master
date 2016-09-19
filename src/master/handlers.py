@@ -38,7 +38,7 @@ class ConfigHandler(AuthenticatedHandler):
                 game = {
                     "versions": versions,
                     "gamespace": gamespace_id,
-                    "max_players": stt["max_players"]
+                    "max_players": stt.max_players
                 }
                 games[game_id] = game
 
@@ -54,9 +54,9 @@ class InternalHandler(object):
         self.application = application
 
     @coroutine
-    def controller_action(self, action, room_id, gamespace, payload):
+    def controller_action(self, action, gamespace, room_id, payload):
         try:
-            result = yield self.application.ctl_client.received(room_id, gamespace, action, payload) or {}
+            result = yield self.application.ctl_client.received(gamespace, room_id, action, payload) or {}
         except ControllerError as e:
             raise InternalError(500, e.message)
 

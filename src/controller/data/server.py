@@ -11,6 +11,12 @@ import msg
 import datetime
 import common.events
 import common.jsonrpc
+import common.discover
+
+from common.discover import DiscoveryError
+from common.internal import Internal, InternalError
+
+import ujson
 
 
 class BufferedLog(object):
@@ -94,17 +100,16 @@ class GameServer(object):
         self.handlers = {}
 
         # and common game config
-        game_config = room.game_settings()
-        other_settings = game_config.get("settings", {})
+        game_settings = room.game_settings()
 
-        ports_num = other_settings.get("ports", 1)
+        ports_num = game_settings.get("ports", 1)
         self.ports = []
 
         # get ports from the pool
         for i in xrange(0, ports_num):
             self.ports.append(gs.pool.acquire())
 
-        self.check_period = other_settings.get("check_period", GameServer.CHECK_PERIOD)
+        self.check_period = game_settings.get("check_period", GameServer.CHECK_PERIOD)
 
         self.str_data = LineStream()
         self.err_data = LineStream()
@@ -143,10 +148,62 @@ class GameServer(object):
 
         tornado.ioloop.IOLoop.current().spawn_callback(self.__check_status__)
 
+        # return the game settings to the game server that called the 'inited' callback
+        server_settings = self.room.server_settings()
+        raise Return(server_settings)
+
     @coroutine
-    def spawn(self, path, binary, sock_path, other_arguments):
+    def __prepare__(self, game_settings):
+        env = {
+            "gamespace_id": str(self.room.gamespace)
+        }
+
+        token = game_settings.get("token", {})
+        authenticate = token.get("authenticate", False)
+
+        if authenticate:
+            self.__notify__("Authenticating for server-side use.")
+
+            username = token.get("username")
+            password = token.get("password")
+            scopes = token.get("scopes", "")
+
+            if not username:
+                raise SpawnError("No 'token.username' field.")
+
+            internal = Internal()
+
+            try:
+                access_token = yield internal.request(
+                    "login", "authenticate",
+                    credential="dev", username=username, key=password, scopes=scopes,
+                    gamespace_id=self.room.gamespace, unique="false")
+            except InternalError as e:
+                raise SpawnError("Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
+            else:
+                self.__notify__("Authenticated for server-side use!")
+                env["access_token"] = access_token["token"]
+
+        discover = game_settings.get("discover", [])
+
+        if discover:
+            self.__notify__("Discovering services for server-side use.")
+
+            try:
+                services = yield common.discover.cache.get_services(discover, network="external")
+            except DiscoveryError as e:
+                raise SpawnError("Failed to discover services for server-side use: " + e.message)
+            else:
+                env["services"] = ujson.dumps(services, escape_forward_slashes=False)
+
+        raise Return(env)
+
+    @coroutine
+    def spawn(self, path, binary, sock_path, cmd_arguments, game_settings):
 
         yield self.listen(sock_path)
+
+        env = yield self.__prepare__(game_settings)
 
         arguments = [
             # application binary
@@ -157,15 +214,20 @@ class GameServer(object):
             ",".join(str(port) for port in self.ports)
         ]
         # and then custom arguments
-        arguments.extend(other_arguments)
+        arguments.extend(cmd_arguments)
 
         cmd = " ".join(arguments)
         self.__notify__("Spawning: " + cmd)
 
+        self.__notify__("Environment:")
+
+        for name, value in env.iteritems():
+            self.__notify__("  " + name + " = " + value + ";")
+
         self.set_status(GameServer.STATUS_INITIALIZING)
 
         try:
-            self.pipe = asyncproc.Process(cmd, shell=True, cwd=path, preexec_fn=os.setsid)
+            self.pipe = asyncproc.Process(cmd, shell=True, cwd=path, preexec_fn=os.setsid, env=env)
         except OSError as e:
             reason = "Failed to spawn a server: " + e.args[1]
             self.__notify__(reason)
@@ -179,10 +241,12 @@ class GameServer(object):
         self.__notify__("Server '{0}' spawned, waiting for init command.".format(self.name))
 
         def wait(callback):
+            @coroutine
             def stopped(*args, **kwargs):
                 self.__clear_handle__("stopped")
-                callback(SpawnError("Stopped before 'init' command received."))
+                callback(SpawnError("Stopped before 'inited' command received."))
 
+            @coroutine
             def inited(*args, **kwargs):
                 self.__clear_handle__("inited")
                 self.__clear_handle__("stopped")
@@ -191,7 +255,8 @@ class GameServer(object):
                 callback(*args, **kwargs)
 
                 # we're done initializing
-                tornado.ioloop.IOLoop.current().spawn_callback(self.inited)
+                res_ = yield self.inited()
+                raise Return(res_)
 
             # catch the init message
             self.__handle__("inited", inited)
@@ -223,7 +288,7 @@ class GameServer(object):
         try:
             self.pipe.kill(signal.SIGKILL if kill else signal.SIGTERM)
         except OSError as e:
-            self.__notify__("Server terminate error: " + e.message)
+            self.__notify__("Server terminate error: " + e.args[1])
             if not kill:
                 yield self.terminate(kill=True)
 
@@ -280,7 +345,7 @@ class GameServer(object):
             # if this action is registered
             # inside of the internal handlers
             # then catch it
-            response = self.handlers[method](*args, **kwargs)
+            response = yield self.handlers[method](*args, **kwargs)
         else:
             response = yield self.room.notify(method, *args, **kwargs)
 

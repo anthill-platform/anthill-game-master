@@ -50,21 +50,21 @@ class GameServersData(object):
     def spawn(self, game_id, game_version, room):
         name = "game_" + game_id + "_" + str(room.id())
 
-        # get the version dependent settings
-        version_config = room.version_settings()
+        game_settings = room.game_settings()
 
         try:
-            binary = version_config["binary"]
-            arguments = version_config["arguments"]
+            binary = game_settings["binary"]
+            arguments = game_settings["arguments"]
         except (KeyError, ValueError) as e:
             raise server.SpawnError("Failed to spawn game server: " + e.message)
 
         instance = yield self.instantiate(name, game_id, game_version, room)
+
         app_path = os.path.join(self.binaries_path, game_id, game_version)
         sock_path = os.path.join(self.sock_path, name)
 
         try:
-            init = yield instance.spawn(app_path, binary, sock_path, arguments)
+            init = yield instance.spawn(app_path, binary, sock_path, arguments, game_settings)
         except server.SpawnError as e:
             logging.error("Failed to spawn server instance: " + e.message)
             raise e
@@ -76,6 +76,7 @@ class GameServersData(object):
             "ports": instance.ports,
             "init": init or {}
         }
+
         raise Return(result)
 
     @coroutine

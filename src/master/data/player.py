@@ -20,8 +20,11 @@ class Player(object):
         self.game_id = game_id
         self.game_version = game_version
         self.account_id = str(account_id)
-        self.game_settings = {}
-        self.version_settings = {}
+
+        self.settings = None
+        self.game_settings = None
+
+        self.server_settings = {}
         self.players = []
         self.room = None
         self.room_id = None
@@ -33,22 +36,24 @@ class Player(object):
 
     @coroutine
     def init(self):
-        self.game_settings = yield self.games.get_game_settings(self.gamespace, self.game_id)
+        self.settings = yield self.games.get_game_settings(self.gamespace, self.game_id)
+        self.game_settings = self.settings.game_settings
+
         try:
-            self.version_settings = yield self.games.get_game_version_config(
+            self.server_settings = yield self.games.get_game_version_server_settings(
                 self.gamespace, self.game_id, self.game_version)
         except GameVersionNotFound as e:
             logging.info("Applied default config for version '{0}'".format(self.game_version))
-            self.version_settings = self.game_settings["default_settings"]
+            self.server_settings = self.settings.server_settings
 
-            if not self.version_settings:
+            if not self.server_settings:
                 raise PlayerError("No default version configuration")
 
     @coroutine
-    def join(self, settings, auto_create=False):
+    def join(self, room_settings, auto_create=False):
         """
         Joins a player to the first available room. Waits until the room is
-        :param settings: filters to search the rooms
+        :param room_settings: filters to search the rooms
         :param auto_create: if no such room, create one
         """
 
@@ -57,7 +62,7 @@ class Player(object):
         try:
             self.record_id, self.room = yield self.rooms.find_and_join_room(
                 self.gamespace, self.game_id, self.game_version,
-                self.account_id, key, self.access_token, settings)
+                self.account_id, key, self.access_token, room_settings)
             self.room_id = self.room["room_id"]
 
             location = self.room["location"]
@@ -75,7 +80,7 @@ class Player(object):
 
                 self.record_id, self.room_id = yield self.rooms.create_and_join_room(
                     self.gamespace, self.game_id, self.game_version,
-                    self.game_settings, settings, self.account_id,
+                    self.settings, room_settings, self.account_id,
                     key, self.access_token
                 )
 
@@ -84,13 +89,13 @@ class Player(object):
                 try:
                     combined_settings = {
                         "game": self.game_settings,
-                        "version": self.version_settings,
-                        "room": settings
+                        "server": self.server_settings,
+                        "room": room_settings
                     }
 
                     result = yield self.rooms.spawn_server(
                         self.gamespace, self.game_id, self.game_version,
-                        self.room_id, combined_settings
+                        self.room_id, self.settings.server_host, combined_settings
                     )
                 except RoomError as e:
                     # failed to spawn a server, then leave

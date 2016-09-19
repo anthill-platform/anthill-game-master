@@ -3,6 +3,6 @@ CREATE TABLE `game_versions` (
   `game_id` varchar(64) NOT NULL DEFAULT '',
   `game_version` varchar(64) NOT NULL DEFAULT '',
   `gamespace_id` int(11) NOT NULL,
-  `game_config` json NOT NULL,
+  `server_settings` json NOT NULL,
   PRIMARY KEY (`record_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

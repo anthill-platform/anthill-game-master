@@ -51,8 +51,8 @@ class Room(object):
     def stopped(self, result, *args, **kwargs):
         self.rooms.delete(self.room_id)
 
-    def version_settings(self):
-        return self.settings["version"]
+    def server_settings(self):
+        return self.settings["server"]
 
 
 class RoomSlot(object):
@@ -72,7 +72,7 @@ class RoomsData(object):
     def new(self, gamespace, room_id, settings):
         logging.info("New room: " + str(room_id))
 
-        room = Room(self, room_id, gamespace, settings)
+        room = Room(self, gamespace, room_id, settings)
         self.rooms[room_id] = room
         return room
 

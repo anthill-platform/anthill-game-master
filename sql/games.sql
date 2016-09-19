@@ -5,7 +5,7 @@ CREATE TABLE `games` (
   `server_host` varchar(255) NOT NULL DEFAULT '',
   `schema` json NOT NULL,
   `max_players` int(11) NOT NULL,
-  `settings` json NOT NULL,
-  `default_settings` json NOT NULL,
+  `game_settings` json NOT NULL,
+  `server_settings` json NOT NULL,
   PRIMARY KEY (`record_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

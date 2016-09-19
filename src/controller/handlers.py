@@ -14,7 +14,7 @@ class InternalHandler(object):
         gs = self.application.gs
         rooms = self.application.rooms
 
-        room = rooms.new(room_id, gamespace, settings)
+        room = rooms.new(gamespace, room_id, settings)
 
         try:
             location = yield gs.spawn(game_id, game_version, room)

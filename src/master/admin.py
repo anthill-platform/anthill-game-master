@@ -69,35 +69,54 @@ class ApplicationSettingsController(a.AdminController):
         try:
             game = yield games.get_game_settings(self.gamespace, record_id)
         except GameNotFound:
-            game = {}
+            game = games.default_game_settings()
+            empty = True
+        else:
+            empty = False
 
         result = {
             "app_id": record_id,
             "app_record_id": app["id"],
             "app_name": app["title"],
-            "max_players": game.get("max_players", "8"),
-            "settings": game.get("settings", {}),
-            "default_settings": game.get("default_settings", {}),
-            "server_host": game.get("server_host", ""),
-            "schema": game.get("schema", GamesModel.DEFAULT_SCHEME)
+            "max_players": game.max_players,
+            "game_settings": game.game_settings,
+            "server_settings": game.server_settings,
+            "server_host": game.server_host,
+            "schema": game.schema,
+            "empty": empty
         }
 
         raise a.Return(result)
 
     def render(self, data):
-        return [
+
+        l = [
             a.breadcrumbs([
                 a.link("apps", "Applications"),
                 a.link("app", data["app_name"], record_id=self.context.get("record_id"))
-            ], "Settings"),
+            ], "Settings")
+        ]
+
+        if data["empty"]:
+            l.append(a.notice(
+                "This configuration not has been set yet",
+                "This game is not configured. Thus, launching a server is impossible, "
+                "until this configurations is saved. Update this configuration to configure the game."))
+
+        l.extend([
             a.form("Application settings", fields={
-                "server_host": a.field("Game controller service ID (to be discovered by discovery service)",
-                                       "text", "primary", "non-empty"),
-                "schema": a.field("Version properties schema", "json", "primary", "non-empty"),
-                "default_settings": a.field("Default configuration",
-                                            "dorn", "primary", "non-empty", schema=data["schema"]),
-                "max_players": a.field("Max players per room", "text", "primary", "number"),
-                "settings": a.field("Other game-dependent settings", "json", "primary", "non-empty")
+                "server_host": a.field(
+                    "Game controller service ID (to be discovered by discovery service)",
+                    "text", "primary", "non-empty", order=3),
+                "schema": a.field(
+                    "Game Server Configuration Schema", "json", "primary", "non-empty", order=5),
+                "server_settings": a.field(
+                    "The configuration would be send to the game server once it initialized.",
+                    "dorn", "primary", "non-empty", schema=data["schema"], order=2),
+                "max_players": a.field("Max players per room", "text", "primary", "number", order=4),
+                "game_settings": a.field(
+                    "Game Configuration", "dorn",
+                    "primary", "non-empty", schema=GamesModel.GAME_SETTINGS_SCHEME, order=1)
             }, methods={
                 "update": a.method("Update", "primary")
             }, data=data),
@@ -105,7 +124,9 @@ class ApplicationSettingsController(a.AdminController):
                 a.link("app", "Go back", record_id=data["app_record_id"]),
                 a.link("https://spacetelescope.github.io/understanding-json-schema/index.html", "See docs", icon="book")
             ])
-        ]
+        ])
+
+        return l
 
     def scopes_read(self):
         return ["game_admin"]
@@ -114,7 +135,7 @@ class ApplicationSettingsController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def update(self, server_host, schema, max_players, settings, default_settings):
+    def update(self, server_host, schema, max_players, game_settings, server_settings):
 
         record_id = self.context.get("record_id")
 
@@ -122,8 +143,8 @@ class ApplicationSettingsController(a.AdminController):
         games = self.application.games
 
         try:
-            settings = json.loads(settings)
-            default_settings = json.loads(default_settings)
+            game_settings = json.loads(game_settings)
+            server_settings = json.loads(server_settings)
         except ValueError:
             raise a.ActionError("Corrupted JSON")
 
@@ -140,7 +161,7 @@ class ApplicationSettingsController(a.AdminController):
         try:
             yield games.set_game_settings(
                 self.gamespace, record_id, server_host,
-                schema, max_players, settings, default_settings)
+                schema, max_players, game_settings, server_settings)
         except GameError as e:
             raise a.ActionError("Failed: " + e.message)
 
@@ -183,18 +204,20 @@ class ApplicationVersionController(a.AdminController):
         try:
             game = yield games.get_game_settings(self.gamespace, app_id)
         except GameNotFound:
-            game = {}
+            schema = {}
+        else:
+            schema = game.schema
 
         try:
-            game_config = yield games.get_game_version_config(self.gamespace, app_id, version_id)
+            server_settings = yield games.get_game_version_server_settings(self.gamespace, app_id, version_id)
         except GameVersionNotFound:
-            game_config = {}
+            server_settings = {}
 
         result = {
             "app_id": app_id,
             "app_name": app["title"],
-            "game_config": game_config,
-            "schema": game.get("schema", {})
+            "server_settings": server_settings,
+            "schema": schema
         }
 
         raise a.Return(result)
@@ -202,8 +225,7 @@ class ApplicationVersionController(a.AdminController):
     def render(self, data):
         config = []
 
-        game_config = data["game_config"]
-        if not game_config:
+        if not data["server_settings"]:
             config.append(a.notice(
                 "Default configuration",
                 "This version ({0}) has no configuration, so default configuration applied. "
@@ -218,8 +240,8 @@ class ApplicationVersionController(a.AdminController):
             ], "Version '{0}'".format(self.context.get("version_id"))),
             a.form(title="Server instance configuration for version {0}".format(
                 self.context.get("version_id")), fields={
-                "game_config": a.field("Configuration", "dorn", "primary", "non-empty",
-                                       schema=data["schema"])
+                "server_settings": a.field("Server Configuration", "dorn", "primary", "non-empty",
+                                           schema=data["schema"])
             }, methods={
                 "update": a.method("Update", "primary"),
                 "delete": a.method("Delete", "danger")
@@ -238,19 +260,19 @@ class ApplicationVersionController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def update(self, game_config):
+    def update(self, server_settings):
 
         games = self.application.games
         app_id = self.context.get("app_id")
         version_id = self.context.get("version_id")
 
         try:
-            game_config = json.loads(game_config)
+            server_settings = json.loads(server_settings)
         except ValueError:
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield games.set_game_version_config(self.gamespace, app_id, version_id, game_config)
+            yield games.set_game_version_server_settings(self.gamespace, app_id, version_id, server_settings)
         except GameError as e:
             raise a.ActionError("Failed to update version config: " + e.message)
 

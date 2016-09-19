@@ -136,10 +136,10 @@ class RoomsModel(Model):
             raise Return(room_id)
 
     @coroutine
-    def create_and_join_room(self, gamespace, game_id, game_version, game_settings, room_settings,
+    def create_and_join_room(self, gamespace, game_id, game_version, settings, room_settings,
                              account_id, key, access_token):
 
-        max_players = game_settings["max_players"]
+        max_players = settings.max_players
 
         try:
             room_id = yield self.db.insert(
@@ -259,10 +259,7 @@ class RoomsModel(Model):
         raise Return(room)
 
     @coroutine
-    def instantiate(self, gamespace, game_id, game_version, room_id, settings):
-
-        game_settings, version_settings, room_settings = settings["game"], settings["version"], settings["room"]
-        server_host = game_settings["server_host"]
+    def instantiate(self, gamespace, game_id, game_version, room_id, server_host, settings):
 
         try:
             result = yield self.internal.request(
@@ -381,9 +378,9 @@ class RoomsModel(Model):
             raise RoomError("Failed to leave a room: " + e.args[1])
 
     @coroutine
-    def spawn_server(self, gamespace, game_id, game_version, room_id, settings):
+    def spawn_server(self, gamespace, game_id, game_version, room_id, server_host, settings):
 
-        location = yield self.instantiate(gamespace, game_id, game_version, room_id, settings)
+        location = yield self.instantiate(gamespace, game_id, game_version, room_id, server_host, settings)
         yield self.assign_location(gamespace, room_id, location)
 
         raise Return({

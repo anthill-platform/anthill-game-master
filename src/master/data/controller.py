@@ -2,7 +2,7 @@
 from tornado.gen import coroutine, Return
 
 import logging
-from common.internal import Internal
+from common.internal import Internal, InternalError
 
 from room import ApproveFailed
 
@@ -18,7 +18,7 @@ class ControllersClientModel(object):
         self.internal = Internal()
 
     @coroutine
-    def joined(self, room_id, gamespace, key=None, extend_token=None, extend_scopes=None, **payload):
+    def joined(self, gamespace, room_id, key=None, extend_token=None, extend_scopes=None, **payload):
 
         if not key:
             raise ControllerError("No key field")
@@ -45,7 +45,7 @@ class ControllersClientModel(object):
             })
 
     @coroutine
-    def left(self, room_id, gamespace, key=None, **payload):
+    def left(self, gamespace, room_id, key=None, **payload):
 
         if not key:
             raise ControllerError("No key field")
@@ -56,13 +56,14 @@ class ControllersClientModel(object):
             raise ControllerError("Failed to approve a leave")
         else:
             raise Return({})
+
     @coroutine
-    def received(self, room_id, gamespace, action, payload):
+    def received(self, gamespace, room_id, action, payload):
         receiver = getattr(self, action)
 
         if receiver:
             try:
-                result = yield receiver(room_id, gamespace, **payload)
+                result = yield receiver(gamespace, room_id, **payload)
             except TypeError as e:
                 raise ControllerError("Failed to call action '{0}': {1}".format(action, e.message))
             raise Return(result)
@@ -70,7 +71,7 @@ class ControllersClientModel(object):
             raise ControllerError("No such action receiver: " + action)
 
     @coroutine
-    def stopped(self, room_id, gamespace, **payload):
+    def stopped(self, gamespace, room_id, **payload):
         logging.info("Room '{0}' died.".format(room_id))
         yield self.rooms.remove_room(gamespace, room_id)
         raise Return({})
