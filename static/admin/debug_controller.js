@@ -198,13 +198,13 @@
                 server = s.server;
 
                 var status_icon = {
-                    "loading": "refresh",
+                    "loading": "refresh fa-spin",
                     "running": "play",
-                    "stopped": "ban-circle",
-                    "error": "remove-sign"
+                    "stopped": "power-off",
+                    "error": "bug"
                 }[server.status];
 
-                var title = '<span class="glyphicon glyphicon-' + status_icon + '" aria-hidden="true"></span> ' +
+                var title = '<i class="fa fa-' + status_icon + '"></i> ' +
                     server.name;
 
                 s.node.html(title);

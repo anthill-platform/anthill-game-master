@@ -155,6 +155,27 @@ class GamesModel(Model):
                 "type": "array",
                 "format": "table",
                 "propertyOrder": 6
+            },
+            "env": {
+                "items": {
+                    "type": "object",
+                    "title": "A Variable",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "title": "Key",
+                            "minLength": 1
+                        },
+                        "value": {
+                            "type": "string",
+                            "title": "Value"
+                        }
+                    }
+                },
+                "title": "Environment Variables",
+                "type": "array",
+                "format": "table",
+                "propertyOrder": 7
             }
         },
         "options":

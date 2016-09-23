@@ -58,13 +58,19 @@ class GameServersData(object):
         except (KeyError, ValueError) as e:
             raise server.SpawnError("Failed to spawn game server: " + e.message)
 
+        env = {
+            e["key"]: e["value"]
+            for e in game_settings.get("env", [])
+            if "key" in e and "value" in e
+        }
+
         instance = yield self.instantiate(name, game_id, game_version, room)
 
         app_path = os.path.join(self.binaries_path, game_id, game_version)
         sock_path = os.path.join(self.sock_path, name)
 
         try:
-            init = yield instance.spawn(app_path, binary, sock_path, arguments, game_settings)
+            init = yield instance.spawn(app_path, binary, sock_path, arguments, env, game_settings)
         except server.SpawnError as e:
             logging.error("Failed to spawn server instance: " + e.message)
             raise e

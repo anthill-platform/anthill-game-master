@@ -199,11 +199,14 @@ class GameServer(object):
         raise Return(env)
 
     @coroutine
-    def spawn(self, path, binary, sock_path, cmd_arguments, game_settings):
+    def spawn(self, path, binary, sock_path, cmd_arguments, env, game_settings):
 
         yield self.listen(sock_path)
 
-        env = yield self.__prepare__(game_settings)
+        if not isinstance(env, dict):
+            raise SpawnError("env is not a dict")
+
+        env.update((yield self.__prepare__(game_settings)))
 
         arguments = [
             # application binary
