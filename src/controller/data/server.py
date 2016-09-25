@@ -135,7 +135,10 @@ class GameServer(object):
                     self.__notify__("Timeout to check status")
                     yield self.terminate(False)
                 else:
-                    status = response.get("status", "bad")
+                    if not isinstance(response, dict):
+                        status = "not_a_dict"
+                    else:
+                        status = response.get("status", "bad")
                     self.__notify__("Status: " + status)
                     if status != "ok":
                         self.__notify__("Bad status")
@@ -153,10 +156,16 @@ class GameServer(object):
         raise Return(server_settings)
 
     @coroutine
-    def __prepare__(self, game_settings):
-        env = {
-            "gamespace_id": str(self.room.gamespace)
-        }
+    def __prepare__(self, room):
+        room_settings = room.room_settings()
+
+        env = {}
+
+        if isinstance(room_settings, dict):
+            for key, value in room_settings.iteritems():
+                env["room:" + key] = ujson.dumps(value)
+
+        game_settings = room.game_settings()
 
         token = game_settings.get("token", {})
         authenticate = token.get("authenticate", False)
@@ -182,7 +191,7 @@ class GameServer(object):
                 raise SpawnError("Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
             else:
                 self.__notify__("Authenticated for server-side use!")
-                env["access_token"] = access_token["token"]
+                env["login:access_token"] = access_token["token"]
 
         discover = game_settings.get("discover", [])
 
@@ -194,19 +203,25 @@ class GameServer(object):
             except DiscoveryError as e:
                 raise SpawnError("Failed to discover services for server-side use: " + e.message)
             else:
-                env["services"] = ujson.dumps(services, escape_forward_slashes=False)
+                env["discovery:services"] = ujson.dumps(services, escape_forward_slashes=False)
 
         raise Return(env)
 
     @coroutine
-    def spawn(self, path, binary, sock_path, cmd_arguments, env, game_settings):
+    def spawn(self, path, binary, sock_path, cmd_arguments, env, room):
 
-        yield self.listen(sock_path)
+        if not os.path.isdir(path):
+            raise SpawnError("Game server is not deployed yet")
+
+        if not os.path.isfile(os.path.join(path, binary)):
+            raise SpawnError("Game server binary is not deployed yet")
 
         if not isinstance(env, dict):
             raise SpawnError("env is not a dict")
 
-        env.update((yield self.__prepare__(game_settings)))
+        env.update((yield self.__prepare__(room)))
+
+        yield self.listen(sock_path)
 
         arguments = [
             # application binary

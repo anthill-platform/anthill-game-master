@@ -21,6 +21,28 @@ class RoomNotFound(Exception):
     pass
 
 
+class RoomAdapter(object):
+    def __init__(self, data):
+        self.room_id = data.get("room_id")
+        self.room_settings = data.get("room_settings", {})
+        self.players = data.get("players", 0)
+        self.location = data.get("location", {})
+        self.game_id = data.get("game_id")
+        self.game_version = data.get("game_version")
+        self.max_players = data.get("max_players", 8)
+
+    def dump(self):
+        return {
+            "id": self.room_id,
+            "room_settings": self.room_settings,
+            "players": self.players,
+            "location": self.location,
+            "game_id": self.game_id,
+            "game_version": self.game_version,
+            "max_players": self.max_players
+        }
+
+
 class RoomsModel(Model):
     @coroutine
     def __inc_players_num__(self, room_id, db):
@@ -168,11 +190,11 @@ class RoomsModel(Model):
         :param key: an unique string to find the record by
         :param access_token: active player's access token
         :param settings: room specific filters, defined like so:
-                {"filterA": 5, "filterB": true}
+                {"filterA": 5, "filterB": true, "filterC": {"@func": ">", "@value": 10}}
         :returns a pair of record_id for the player and room info
         """
         try:
-            keys, values = common.database.format_conditions_json('settings', settings)
+            body, values = common.database.format_conditions_json('settings', settings)
         except common.database.ConditionError as e:
             raise RoomError(e.message)
 
@@ -193,7 +215,7 @@ class RoomsModel(Model):
                       `state`='SPAWNED'
                       {0} {1}
                     FOR UPDATE;
-                    """.format("AND" if keys else "", keys), gamespace, game_id, game_version, *values
+                    """.format("AND" if body else "", body), gamespace, game_id, game_version, *values
                 )
 
                 if room is None:
@@ -216,7 +238,7 @@ class RoomsModel(Model):
     def find_room(self, gamespace, game_id, game_version, settings):
 
         try:
-            keys, values = common.database.format_conditions_json('settings', settings)
+            body, values = common.database.format_conditions_json('settings', settings)
         except common.database.ConditionError as e:
             raise RoomError(e.message)
 
@@ -231,7 +253,7 @@ class RoomsModel(Model):
                   `players`<`max_players` AND
                   `state`='SPAWNED'
                   {0} {1}
-                """.format("AND" if keys else "", keys), gamespace, game_id, game_version, *values
+                """.format("AND" if body else "", body), gamespace, game_id, game_version, *values
             )
         except common.database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
@@ -239,7 +261,7 @@ class RoomsModel(Model):
         if room is None:
             raise RoomNotFound()
 
-        raise Return(room)
+        raise Return(RoomAdapter(room))
 
     @coroutine
     def get_room(self, gamespace, room_id):
@@ -256,7 +278,7 @@ class RoomsModel(Model):
         if room is None:
             raise RoomNotFound()
 
-        raise Return(room)
+        raise Return(RoomAdapter(room))
 
     @coroutine
     def instantiate(self, gamespace, game_id, game_version, room_id, server_host, settings):
@@ -339,7 +361,7 @@ class RoomsModel(Model):
     def list_rooms(self, gamespace, game_id, game_version, settings):
 
         try:
-            keys, values = common.database.format_conditions_json('settings', settings)
+            body, values = common.database.format_conditions_json('settings', settings)
         except common.database.ConditionError as e:
             raise RoomError(e.message)
 
@@ -349,12 +371,12 @@ class RoomsModel(Model):
                 SELECT * FROM `rooms`
                 WHERE `gamespace_id`=%s AND `game_id`=%s AND `game_version`=%s AND `players`<`max_players`
                   {0} {1}
-                """.format("AND" if keys else "", keys), gamespace, game_id, game_version, *values
+                """.format("AND" if body else "", body), gamespace, game_id, game_version, *values
             )
         except common.database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
 
-        raise Return(rooms)
+        raise Return(map(RoomAdapter, rooms))
 
     @coroutine
     def remove_room(self, gamespace, room_id):
