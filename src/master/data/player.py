@@ -5,7 +5,9 @@ import tornado.ioloop
 from room import RoomNotFound, RoomError
 from game import GameVersionNotFound
 import logging
+
 from common import random_string
+from common.ratelimit import RateLimitExceeded
 
 
 class Player(object):
@@ -61,53 +63,52 @@ class Player(object):
             if isinstance(value, (str, unicode, int, float, bool))
         }
 
-        lock_status = yield self.app.ratelimit.limit("create_room", self.account_id)
-
-        if lock_status:
-            logging.debug("Allowed for a player: " + self.account_id)
-        else:
-            raise PlayerError("Too many requests")
-
-        if not key:
-            key = self.generate_key()
-
-        self.record_id, self.room_id = yield self.rooms.create_and_join_room(
-            self.gamespace, self.game_id, self.game_version,
-            self.settings, room_settings, self.account_id,
-            key, self.access_token
-        )
-
-        logging.info("Created a room: '{0}'".format(self.room_id))
-
         try:
-            combined_settings = {
-                "game": self.game_settings,
-                "server": self.server_settings,
-                "room": room_settings
-            }
+            limit = yield self.app.ratelimit.limit("create_room", self.account_id)
+        except RateLimitExceeded:
+            raise PlayerError("Too many requests")
+        else:
+            if not key:
+                key = self.generate_key()
 
-            result = yield self.rooms.spawn_server(
+            self.record_id, self.room_id = yield self.rooms.create_and_join_room(
                 self.gamespace, self.game_id, self.game_version,
-                self.room_id, self.settings.server_host, combined_settings
+                self.settings, room_settings, self.account_id,
+                key, self.access_token
             )
-        except RoomError as e:
-            # failed to spawn a server, then leave
-            # this will likely to cause the room to be deleted
-            yield self.leave(True)
-            logging.exception("Failed to spawn a server")
-            raise e
 
-        location = result["location"]
+            logging.info("Created a room: '{0}'".format(self.room_id))
 
-        # call a joined coroutine in parallel
-        tornado.ioloop.IOLoop.current().spawn_callback(self.joined)
+            try:
+                combined_settings = {
+                    "game": self.game_settings,
+                    "server": self.server_settings,
+                    "room": room_settings
+                }
 
-        raise Return({
-            "id": self.room_id,
-            "slot": self.record_id,
-            "location": location,
-            "key": key
-        })
+                result = yield self.rooms.spawn_server(
+                    self.gamespace, self.game_id, self.game_version,
+                    self.room_id, self.settings.server_host, combined_settings
+                )
+            except RoomError as e:
+                # failed to spawn a server, then leave
+                # this will likely to cause the room to be deleted
+                yield self.leave(True)
+                logging.exception("Failed to spawn a server")
+                yield limit.rollback()
+                raise e
+
+            location = result["location"]
+
+            # call a joined coroutine in parallel
+            tornado.ioloop.IOLoop.current().spawn_callback(self.joined)
+
+            raise Return({
+                "id": self.room_id,
+                "slot": self.record_id,
+                "location": location,
+                "key": key
+            })
 
     @coroutine
     def join(self, search_settings, auto_create=False, create_room_settings=None):
