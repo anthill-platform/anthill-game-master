@@ -12,7 +12,7 @@ import common.server
 import common.sign
 import common.ratelimit
 
-from data.game import GamesModel
+from data.gameserver import GameServersModel
 from data.room import RoomsModel
 from data.controller import ControllersClientModel
 from data.server import ServersModel
@@ -39,7 +39,7 @@ class GameMasterServer(common.server.Server):
 
         self.env_service = common.environment.EnvironmentClient(self.cache)
 
-        self.games = GamesModel(self.db)
+        self.gameservers = GameServersModel(self.db)
         self.rooms = RoomsModel(self.db)
         self.servers = ServersModel(self.db)
 
@@ -50,15 +50,18 @@ class GameMasterServer(common.server.Server):
         })
 
     def get_models(self):
-        return [self.servers, self.rooms, self.games]
+        return [self.servers, self.rooms, self.gameservers]
 
     def get_admin(self):
         return {
             "index": admin.RootAdminController,
             "apps": admin.ApplicationsController,
             "app": admin.ApplicationController,
-            "app_settings": admin.ApplicationSettingsController,
             "app_version": admin.ApplicationVersionController,
+
+            "game_server": admin.GameServerController,
+            "new_game_server": admin.NewGameServerController,
+            "game_server_version": admin.GameServerVersionController,
 
             "servers": admin.ServersController,
             "server": admin.ServerController,
@@ -83,9 +86,9 @@ class GameMasterServer(common.server.Server):
 
     def get_handlers(self):
         return [
-            (r"/rooms/(.*)/(.*)", h.RoomsHandler),
-            (r"/join/(.*)/(.*)", h.JoinHandler),
-            (r"/create/(.*)/(.*)", h.CreateHandler)
+            (r"/rooms/(.*)/(.*)/(.*)", h.RoomsHandler),
+            (r"/join/(.*)/(.*)/(.*)", h.JoinHandler),
+            (r"/create/(.*)/(.*)/(.*)", h.CreateHandler)
         ]
 
 

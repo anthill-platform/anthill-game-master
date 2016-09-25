@@ -158,18 +158,20 @@ class RoomsModel(Model):
             raise Return(room_id)
 
     @coroutine
-    def create_and_join_room(self, gamespace, game_id, game_version, settings, room_settings,
+    def create_and_join_room(self, gamespace, game_name, game_version, gs, room_settings,
                              account_id, key, access_token):
 
-        max_players = settings.max_players
+        max_players = gs.max_players
 
         try:
             room_id = yield self.db.insert(
                 """
                 INSERT INTO `rooms`
-                (`gamespace_id`, `game_id`, `game_version`, `players`, `max_players`, `location`, `settings`, `state`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'NONE')
-                """, gamespace, game_id, game_version, 1, max_players, "{}", ujson.dumps(room_settings)
+                (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
+                  `max_players`, `location`, `settings`, `state`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE')
+                """, gamespace, game_name, game_version, gs.game_server_id, 1, max_players,
+                "{}", ujson.dumps(room_settings)
             )
 
             record_id = yield self.__insert_player__(gamespace, account_id, room_id, key, access_token, self.db)
@@ -179,13 +181,15 @@ class RoomsModel(Model):
             raise Return((record_id, room_id))
 
     @coroutine
-    def find_and_join_room(self, gamespace, game_id, game_version, account_id, key, access_token, settings):
+    def find_and_join_room(self, gamespace, game_name, game_version, game_server_id,
+                           account_id, key, access_token, settings):
 
         """
         Find the room and join into it, if any
         :param gamespace: the gamespace
-        :param game_id: the game ID
+        :param game_name: the game ID (string)
         :param game_version: the game's version (string, like 1.0)
+        :param game_server_id: game server configuration id
         :param account_id: account of the player
         :param key: an unique string to find the record by
         :param access_token: active player's access token
@@ -209,13 +213,15 @@ class RoomsModel(Model):
                     SELECT * FROM `rooms`
                     WHERE
                       `gamespace_id`=%s AND
-                      `game_id`=%s AND
+                      `game_name`=%s AND
                       `game_version`=%s AND
+                      `game_server_id`=%s AND
                       `players`<`max_players` AND
                       `state`='SPAWNED'
                       {0} {1}
                     FOR UPDATE;
-                    """.format("AND" if body else "", body), gamespace, game_id, game_version, *values
+                    """.format("AND" if body else "", body), gamespace, game_name, game_version,
+                    game_server_id, *values
                 )
 
                 if room is None:
@@ -235,7 +241,7 @@ class RoomsModel(Model):
         raise Return(result)
 
     @coroutine
-    def find_room(self, gamespace, game_id, game_version, settings):
+    def find_room(self, gamespace, game_name, game_version, game_server_id, settings):
 
         try:
             body, values = common.database.format_conditions_json('settings', settings)
@@ -248,12 +254,13 @@ class RoomsModel(Model):
                 SELECT * FROM `rooms`
                 WHERE
                   `gamespace_id`=%s AND
-                  `game_id`=%s AND
+                  `game_name`=%s AND
                   `game_version`=%s AND
+                  `game_server_id`=%s AND
                   `players`<`max_players` AND
                   `state`='SPAWNED'
                   {0} {1}
-                """.format("AND" if body else "", body), gamespace, game_id, game_version, *values
+                """.format("AND" if body else "", body), gamespace, game_name, game_version, game_server_id, *values
             )
         except common.database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
@@ -358,7 +365,7 @@ class RoomsModel(Model):
             raise RoomError("Failed to leave a room: " + e.args[1])
 
     @coroutine
-    def list_rooms(self, gamespace, game_id, game_version, settings):
+    def list_rooms(self, gamespace, game_name, game_version, game_server_id, settings):
 
         try:
             body, values = common.database.format_conditions_json('settings', settings)
@@ -369,9 +376,10 @@ class RoomsModel(Model):
             rooms = yield self.db.query(
                 """
                 SELECT * FROM `rooms`
-                WHERE `gamespace_id`=%s AND `game_id`=%s AND `game_version`=%s AND `players`<`max_players`
+                WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s
+                  AND `game_server_id`=%s AND `players`<`max_players`
                   {0} {1}
-                """.format("AND" if body else "", body), gamespace, game_id, game_version, *values
+                """.format("AND" if body else "", body), gamespace, game_name, game_version, game_server_id, *values
             )
         except common.database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
@@ -408,4 +416,3 @@ class RoomsModel(Model):
         raise Return({
             "location": location
         })
-

@@ -5,7 +5,7 @@ from tornado.gen import coroutine, Return
 import common.admin as a
 from common.environment import AppNotFound
 
-from data.game import GameError, GameNotFound, GameVersionNotFound, GamesModel
+from data.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
 from data.server import ServerNotFound
 
 
@@ -14,34 +14,48 @@ class ApplicationController(a.AdminController):
     def get(self, record_id):
 
         env_service = self.application.env_service
+        gameservers = self.application.gameservers
 
         try:
             app = yield env_service.get_app_info(self.gamespace, record_id)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
+        try:
+            servers = yield gameservers.list_game_servers(self.gamespace, record_id)
+        except GameError as e:
+            raise a.ActionError("Failed to list game servers: " + e.message)
+
         result = {
             "app_id": record_id,
             "app_record_id": app["id"],
             "app_name": app["title"],
-            "versions": app["versions"]
+            "versions": app["versions"],
+            "game_servers": servers
         }
 
         raise a.Return(result)
 
     def render(self, data):
+
+        game_name = self.context.get("record_id")
+
         return [
             a.breadcrumbs([
                 a.link("apps", "Applications")
             ], data["app_name"]),
+            a.links("Game Servers", links=[
+                a.link("game_server", gs.name, icon="rocket", game_server_id=gs.game_server_id, game_name=game_name)
+                for gs in data["game_servers"]
+            ]),
             a.links("Application '{0}' versions".format(data["app_name"]), links=[
-                a.link("app_version", v_name, icon="tags", app_id=self.context.get("record_id"),
+                a.link("app_version", v_name, icon="tags", app_id=game_name,
                        version_id=v_name) for v_name, v_id in data["versions"].iteritems()
-                ]),
+            ]),
             a.links("Navigate", [
                 a.link("apps", "Go back"),
-                a.link("app_settings", "Edit application settings",
-                       icon="cog", record_id=self.context.get("record_id")),
+                a.link("new_game_server", "Create Game Server",
+                       icon="plus", game_name=game_name),
                 a.link("/environment/app", "Manage app '{0}' at 'Environment' service.".format(data["app_name"]),
                        icon="link text-danger", record_id=data["app_record_id"]),
             ])
@@ -54,79 +68,71 @@ class ApplicationController(a.AdminController):
         return ["game_admin"]
 
 
-class ApplicationSettingsController(a.AdminController):
+class GameServerController(a.AdminController):
     @coroutine
-    def get(self, record_id):
+    def get(self, game_server_id, game_name):
 
         env_service = self.application.env_service
-        games = self.application.games
+        gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, record_id)
+            app = yield env_service.get_app_info(self.gamespace, game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            game = yield games.get_game_settings(self.gamespace, record_id)
-        except GameNotFound:
-            game = games.default_game_settings()
-            empty = True
-        else:
-            empty = False
+            gs = yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+        except GameServerNotFound:
+            raise a.ActionError("No such game server")
 
         result = {
-            "app_id": record_id,
-            "app_record_id": app["id"],
             "app_name": app["title"],
-            "max_players": game.max_players,
-            "game_settings": game.game_settings,
-            "server_settings": game.server_settings,
-            "server_host": game.server_host,
-            "schema": game.schema,
-            "empty": empty
+            "max_players": gs.max_players,
+            "game_settings": gs.game_settings,
+            "server_settings": gs.server_settings,
+            "server_host": gs.server_host,
+            "game_server_name": gs.name,
+            "schema": gs.schema
         }
 
         raise a.Return(result)
 
     def render(self, data):
 
-        l = [
+        return [
             a.breadcrumbs([
                 a.link("apps", "Applications"),
-                a.link("app", data["app_name"], record_id=self.context.get("record_id"))
-            ], "Settings")
-        ]
+                a.link("app", data["app_name"], record_id=self.context.get("game_name")),
+            ], data["game_server_name"]),
 
-        if data["empty"]:
-            l.append(a.notice(
-                "This configuration not has been set yet",
-                "This game is not configured. Thus, launching a server is impossible, "
-                "until this configurations is saved. Update this configuration to configure the game."))
-
-        l.extend([
-            a.form("Application settings", fields={
+            a.form("Game Server Settings", fields={
+                "game_server_name": a.field(
+                    "Game Server Name",
+                    "text", "primary", "non-empty", order=0),
+                "game_settings": a.field(
+                    "Game Configuration", "dorn",
+                    "primary", "non-empty", schema=GameServersModel.GAME_SETTINGS_SCHEME, order=1),
+                "server_settings": a.field(
+                    "The configuration would be send to spawned game server instance as a JSON.",
+                    "dorn", "primary", "non-empty", schema=data["schema"], order=2),
                 "server_host": a.field(
                     "Game controller service ID (to be discovered by discovery service)",
                     "text", "primary", "non-empty", order=3),
-                "schema": a.field(
-                    "Game Server Configuration Schema", "json", "primary", "non-empty", order=5),
-                "server_settings": a.field(
-                    "The configuration would be send to the game server once it initialized.",
-                    "dorn", "primary", "non-empty", schema=data["schema"], order=2),
                 "max_players": a.field("Max players per room", "text", "primary", "number", order=4),
-                "game_settings": a.field(
-                    "Game Configuration", "dorn",
-                    "primary", "non-empty", schema=GamesModel.GAME_SETTINGS_SCHEME, order=1)
+                "schema": a.field(
+                    "Game Server Configuration Schema", "json", "primary", "non-empty", order=5)
             }, methods={
-                "update": a.method("Update", "primary")
+                "update": a.method("Update", "primary", order=1),
+                "delete": a.method("Delete", "danger", order=2)
             }, data=data),
             a.links("Navigate", [
-                a.link("app", "Go back", record_id=data["app_record_id"]),
+                a.link("app", "Go back", record_id=self.context.get("game_name")),
+                a.link("new_game_server", "Clone Game Server", icon="clone",
+                       game_name=self.context.get("game_name"),
+                       game_server_id=self.context.get("game_server_id")),
                 a.link("https://spacetelescope.github.io/understanding-json-schema/index.html", "See docs", icon="book")
             ])
-        ])
-
-        return l
+        ]
 
     def scopes_read(self):
         return ["game_admin"]
@@ -135,12 +141,37 @@ class ApplicationSettingsController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def update(self, server_host, schema, max_players, game_settings, server_settings):
+    def delete(self, **ignored):
 
-        record_id = self.context.get("record_id")
+        game_server_id = self.context.get("game_server_id")
+        game_name = self.context.get("game_name")
 
         env_service = self.application.env_service
-        games = self.application.games
+        gameservers = self.application.gameservers
+
+        try:
+            yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        try:
+            yield gameservers.delete_game_server(self.gamespace, game_name, game_server_id)
+        except GameError as e:
+            raise a.ActionError("Failed to delete game server: " + e.message)
+
+        raise a.Redirect(
+            "app",
+            message="Game server has been deleted",
+            record_id=game_name)
+
+    @coroutine
+    def update(self, game_server_name, server_host, schema, max_players, game_settings, server_settings):
+
+        game_server_id = self.context.get("game_server_id")
+        game_name = self.context.get("game_name")
+
+        env_service = self.application.env_service
+        gameservers = self.application.gameservers
 
         try:
             game_settings = json.loads(game_settings)
@@ -149,7 +180,7 @@ class ApplicationSettingsController(a.AdminController):
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield env_service.get_app_info(self.gamespace, record_id)
+            yield env_service.get_app_info(self.gamespace, game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -159,65 +190,184 @@ class ApplicationSettingsController(a.AdminController):
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield games.set_game_settings(
-                self.gamespace, record_id, server_host,
+            yield gameservers.update_game_server(
+                self.gamespace, game_name, game_server_id, game_server_name, server_host,
                 schema, max_players, game_settings, server_settings)
         except GameError as e:
             raise a.ActionError("Failed: " + e.message)
 
         raise a.Redirect(
-            "app_settings",
+            "game_server",
             message="Settings have been updated",
-            record_id=record_id)
+            game_name=game_name,
+            game_server_id=game_server_id)
 
 
-class ApplicationVersionController(a.AdminController):
+class NewGameServerController(a.AdminController):
+    @coroutine
+    def get(self, game_name, game_server_id=None):
+
+        env_service = self.application.env_service
+        gameservers = self.application.gameservers
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        result = {
+            "app_name": app["title"],
+            "schema": GameServersModel.DEFAULT_SERVER_SCHEME,
+            "server_host": "game-ctl",
+            "max_players": "8"
+        }
+
+        if game_server_id:
+            try:
+                gs = yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+            except GameServerNotFound:
+                raise a.ActionError("No such game server to clone from")
+
+            result.update({
+                "max_players": gs.max_players,
+                "game_settings": gs.game_settings,
+                "server_settings": gs.server_settings,
+                "server_host": gs.server_host,
+                "game_server_name": gs.name,
+                "schema": gs.schema
+            })
+
+        raise a.Return(result)
+
+    def render(self, data):
+
+        return [
+            a.breadcrumbs([
+                a.link("apps", "Applications"),
+                a.link("app", data["app_name"], record_id=self.context.get("game_name")),
+            ], "New game server"),
+
+            a.form("Game Server Settings", fields={
+                "game_server_name": a.field(
+                    "Game Server Name",
+                    "text", "primary", "non-empty", order=0),
+                "game_settings": a.field(
+                    "Game Configuration", "dorn",
+                    "primary", "non-empty", schema=GameServersModel.GAME_SETTINGS_SCHEME, order=1),
+                "server_host": a.field(
+                    "Game controller service ID (to be discovered by discovery service)",
+                    "text", "primary", "non-empty", order=3),
+                "max_players": a.field("Max players per room", "text", "primary", "number", order=4),
+                "schema": a.field(
+                    "Custom Game Server Configuration Schema", "json", "primary", "non-empty", order=5)
+            }, methods={
+                "create": a.method("Create", "primary", order=1)
+            }, data=data),
+            a.links("Navigate", [
+                a.link("app", "Go back", record_id=self.context.get("game_name")),
+                a.link("https://spacetelescope.github.io/understanding-json-schema/index.html", "See docs", icon="book")
+            ])
+        ]
+
+    def scopes_read(self):
+        return ["game_admin"]
+
+    def scopes_write(self):
+        return ["game_admin"]
+
+    @coroutine
+    def create(self, game_server_name, server_host, schema, max_players, game_settings):
+
+        game_name = self.context.get("game_name")
+
+        env_service = self.application.env_service
+        gameservers = self.application.gameservers
+
+        try:
+            game_settings = json.loads(game_settings)
+        except ValueError:
+            raise a.ActionError("Corrupted JSON")
+
+        try:
+            yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        try:
+            schema = json.loads(schema)
+        except ValueError:
+            raise a.ActionError("Corrupted JSON")
+
+        try:
+            game_server_id = yield gameservers.create_game_server(
+                self.gamespace, game_name, game_server_name, server_host,
+                schema, max_players, game_settings, {})
+        except GameError as e:
+            raise a.ActionError("Failed: " + e.message)
+        except GameServerExists:
+            raise a.ActionError("Such Game Server already exists")
+
+        raise a.Redirect(
+            "game_server",
+            message="Settings have been updated",
+            game_name=game_name,
+            game_server_id=game_server_id)
+
+
+class GameServerVersionController(a.AdminController):
     @coroutine
     def delete(self, **ignored):
 
-        games = self.application.games
-        app_id = self.context.get("app_id")
-        version_id = self.context.get("version_id")
+        gameservers = self.application.gameservers
+
+        game_name = self.context.get("game_name")
+        game_version = self.context.get("game_version")
+        game_server_id = self.context.get("game_server_id")
 
         try:
-            yield games.delete_game_version(self.gamespace, app_id, version_id)
+            yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+        except GameServerNotFound:
+            raise a.ActionError("No such game server")
+
+        try:
+            yield gameservers.delete_game_version(self.gamespace, game_name, game_version, game_server_id)
         except GameError as e:
             raise a.ActionError("Failed to delete version config: " + e.message)
 
         raise a.Redirect(
             "app_version",
             message="Version config has been deleted",
-            app_id=app_id,
-            version_id=version_id)
+            app_id=game_name,
+            version_id=game_version)
 
     @coroutine
-    def get(self, app_id, version_id):
+    def get(self, game_name, game_version, game_server_id):
 
         env_service = self.application.env_service
-        games = self.application.games
+        gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, app_id)
+            app = yield env_service.get_app_info(self.gamespace, game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            game = yield games.get_game_settings(self.gamespace, app_id)
-        except GameNotFound:
-            schema = {}
-        else:
-            schema = game.schema
+            gs = yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+        except GameServerNotFound:
+            raise a.ActionError("No such game server")
 
         try:
-            server_settings = yield games.get_game_version_server_settings(self.gamespace, app_id, version_id)
+            version_settings = yield gameservers.get_version_game_server(
+                self.gamespace, game_name, game_version, game_server_id)
+
         except GameVersionNotFound:
-            server_settings = {}
+            version_settings = {}
 
         result = {
-            "app_id": app_id,
             "app_name": app["title"],
-            "server_settings": server_settings,
-            "schema": schema
+            "version_settings": version_settings,
+            "game_server_name": gs.name,
+            "schema": gs.schema
         }
 
         raise a.Return(result)
@@ -225,29 +375,36 @@ class ApplicationVersionController(a.AdminController):
     def render(self, data):
         config = []
 
-        if not data["server_settings"]:
+        if not data["version_settings"]:
             config.append(a.notice(
                 "Default configuration",
-                "This version ({0}) has no configuration, so default configuration applied. "
+                "This version ({0}) has no configuration, so default configuration ({1}) applied. "
                 "Edit the configuration below to overwrite it.".format(
-                    self.context.get("version_id")
+                    self.context.get("game_version"), data["game_server_name"]
                 )))
 
         config.extend([
             a.breadcrumbs([
                 a.link("apps", "Applications"),
-                a.link("app", data["app_name"], record_id=self.context.get("app_id"))
-            ], "Version '{0}'".format(self.context.get("version_id"))),
-            a.form(title="Server instance configuration for version {0}".format(
-                self.context.get("version_id")), fields={
+                a.link("app", data["app_name"], record_id=self.context.get("game_name")),
+                a.link("app_version", self.context.get("game_version"),
+                       app_id=self.context.get("game_name"), version_id=self.context.get("game_version")),
+
+            ], "Game Server Configuration '{0}' for version '{1}'".format(
+                data["game_server_name"], self.context.get("game_version"))),
+
+            a.form(title="Server configuration for version {0}".format(
+                self.context.get("game_version")), fields={
                 "server_settings": a.field("Server Configuration", "dorn", "primary", "non-empty",
                                            schema=data["schema"])
             }, methods={
                 "update": a.method("Update", "primary"),
                 "delete": a.method("Delete", "danger")
             }, data=data),
+
             a.links("Navigate", [
-                a.link("app", "Go back", record_id=self.context.get("app_id"))
+                a.link("app_version", "Go back",
+                       app_id=self.context.get("game_name"), version_id=self.context.get("game_version"))
             ])
         ])
 
@@ -262,9 +419,16 @@ class ApplicationVersionController(a.AdminController):
     @coroutine
     def update(self, server_settings):
 
-        games = self.application.games
-        app_id = self.context.get("app_id")
-        version_id = self.context.get("version_id")
+        gameservers = self.application.gameservers
+
+        game_name = self.context.get("game_name")
+        game_version = self.context.get("game_version")
+        game_server_id = self.context.get("game_server_id")
+
+        try:
+            yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+        except GameServerNotFound:
+            raise a.ActionError("No such game server")
 
         try:
             server_settings = json.loads(server_settings)
@@ -272,15 +436,71 @@ class ApplicationVersionController(a.AdminController):
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield games.set_game_version_server_settings(self.gamespace, app_id, version_id, server_settings)
+            yield gameservers.set_version_game_server(
+                self.gamespace, game_name, game_version, game_server_id, server_settings)
+
         except GameError as e:
             raise a.ActionError("Failed to update version config: " + e.message)
 
         raise a.Redirect(
-            "app_version",
+            "game_server_version",
             message="Version config has been updated",
-            app_id=app_id,
-            version_id=version_id)
+            game_name=game_name,
+            game_version=game_version,
+            game_server_id=game_server_id)
+
+
+class ApplicationVersionController(a.AdminController):
+
+    @coroutine
+    def get(self, app_id, version_id):
+
+        env_service = self.application.env_service
+        gameservers = self.application.gameservers
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, app_id)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        try:
+            servers = yield gameservers.list_game_servers(self.gamespace, app_id)
+        except GameError as e:
+            raise a.ActionError("Failed to list game servers" + e.message)
+
+        result = {
+            "app_id": app_id,
+            "app_name": app["title"],
+            "servers": servers
+        }
+
+        raise a.Return(result)
+
+    def render(self, data):
+        return [
+            a.breadcrumbs([
+                a.link("apps", "Applications"),
+                a.link("app", data["app_name"], record_id=self.context.get("app_id"))
+            ], self.context.get("version_id")),
+
+            a.links("Game Servers configurations for game version {0}".format(self.context.get("version_id")), links=[
+                a.link("game_server_version", gs.name, icon="rocket",
+                       game_name=self.context.get("app_id"),
+                       game_version=self.context.get("version_id"),
+                       game_server_id=gs.game_server_id)
+                for gs in data["servers"]
+            ]),
+
+            a.links("Navigate", [
+                a.link("app", "Go back", record_id=self.context.get("app_id"))
+            ])
+        ]
+
+    def scopes_read(self):
+        return ["game_admin"]
+
+    def scopes_write(self):
+        return ["game_admin"]
 
 
 class ApplicationsController(a.AdminController):

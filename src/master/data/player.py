@@ -3,7 +3,7 @@ from tornado.gen import coroutine, Return, sleep
 
 import tornado.ioloop
 from room import RoomNotFound, RoomError
-from game import GameVersionNotFound
+from gameserver import GameVersionNotFound
 import logging
 
 from common import random_string
@@ -14,16 +14,19 @@ class Player(object):
     AUTO_REMOVE_TIME = 10
     LOCK_ACTIONS_TIME = 15
 
-    def __init__(self, app, gamespace, game_id, game_version, account_id, access_token):
+    def __init__(self, app, gamespace, game_name, game_version, game_server_name, account_id, access_token):
         self.app = app
         self.rooms = app.rooms
-        self.games = app.games
+        self.gameservers = app.gameservers
         self.gamespace = gamespace
-        self.game_id = game_id
+
+        self.game_name = game_name
         self.game_version = game_version
+        self.game_server_name = game_server_name
+
         self.account_id = str(account_id)
 
-        self.settings = None
+        self.gs = None
         self.game_settings = None
 
         self.server_settings = {}
@@ -38,17 +41,19 @@ class Player(object):
 
     @coroutine
     def init(self):
-        self.settings = yield self.games.get_game_settings(self.gamespace, self.game_id)
-        self.game_settings = self.settings.game_settings
+        self.gs = yield self.gameservers.find_game_server(
+            self.gamespace, self.game_name, self.game_server_name)
+
+        self.game_settings = self.gs.game_settings
 
         try:
-            self.server_settings = yield self.games.get_game_version_server_settings(
-                self.gamespace, self.game_id, self.game_version)
+            self.server_settings = yield self.gameservers.get_version_game_server(
+                self.gamespace, self.game_name, self.game_version, self.gs.game_server_id)
         except GameVersionNotFound as e:
             logging.info("Applied default config for version '{0}'".format(self.game_version))
-            self.server_settings = self.settings.server_settings
+            self.server_settings = self.gs.server_settings
 
-            if not self.server_settings:
+            if self.server_settings is None:
                 raise PlayerError("No default version configuration")
 
     @coroutine
@@ -72,8 +77,8 @@ class Player(object):
                 key = self.generate_key()
 
             self.record_id, self.room_id = yield self.rooms.create_and_join_room(
-                self.gamespace, self.game_id, self.game_version,
-                self.settings, room_settings, self.account_id,
+                self.gamespace, self.game_name, self.game_version,
+                self.gs, room_settings, self.account_id,
                 key, self.access_token
             )
 
@@ -87,8 +92,8 @@ class Player(object):
                 }
 
                 result = yield self.rooms.spawn_server(
-                    self.gamespace, self.game_id, self.game_version,
-                    self.room_id, self.settings.server_host, combined_settings
+                    self.gamespace, self.game_name, self.game_version,
+                    self.room_id, self.gs.server_host, combined_settings
                 )
             except RoomError as e:
                 # failed to spawn a server, then leave
@@ -124,7 +129,7 @@ class Player(object):
 
         try:
             self.record_id, self.room = yield self.rooms.find_and_join_room(
-                self.gamespace, self.game_id, self.game_version,
+                self.gamespace, self.game_name, self.game_version, self.gs.game_server_id,
                 self.account_id, key, self.access_token, search_settings)
             self.room_id = self.room["room_id"]
 

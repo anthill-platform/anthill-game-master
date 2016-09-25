@@ -64,7 +64,7 @@ class DebugController(a.StreamAdminController):
     def serialize_server(server):
         return {
             "status": server.status,
-            "game": server.game_id,
+            "game": server.game_name,
             "version": server.game_version,
             "name": server.name
         }

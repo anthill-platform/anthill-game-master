@@ -29,7 +29,7 @@ class InternalHandler(object):
 class JoinHandler(AuthenticatedHandler):
     @scoped(scopes=[])
     @coroutine
-    def post(self, game_id, game_version):
+    def post(self, game_name, game_server_name, game_version):
 
         gamespace = self.token.get(AccessToken.GAMESPACE)
         account = self.token.account
@@ -40,7 +40,9 @@ class JoinHandler(AuthenticatedHandler):
         except ValueError:
             raise HTTPError(400, "Corrupted JSON")
 
-        player = Player(self.application, gamespace, game_id, game_version, account, self.token.key)
+        player = Player(self.application, gamespace, game_name, game_version,
+                        game_server_name, account, self.token.key)
+
         auto_create = self.get_argument("auto_create", "true") == "true"
 
         try:
@@ -61,7 +63,7 @@ class JoinHandler(AuthenticatedHandler):
 class CreateHandler(AuthenticatedHandler):
     @scoped(scopes=[])
     @coroutine
-    def post(self, game_id, game_version):
+    def post(self, game_name, game_server_name, game_version):
 
         gamespace = self.token.get(AccessToken.GAMESPACE)
         account = self.token.account
@@ -71,7 +73,8 @@ class CreateHandler(AuthenticatedHandler):
         except ValueError:
             raise HTTPError(400, "Corrupted JSON")
 
-        player = Player(self.application, gamespace, game_id, game_version, account, self.token.key)
+        player = Player(self.application, gamespace, game_name, game_version,
+                        game_server_name, account, self.token.key)
 
         try:
             yield player.init()
@@ -89,7 +92,7 @@ class CreateHandler(AuthenticatedHandler):
 class RoomsHandler(AuthenticatedHandler):
     @scoped(scopes=[])
     @coroutine
-    def get(self, game_id, game_version):
+    def get(self, game_name, game_server_name, game_version):
         gamespace = self.token.get(AccessToken.GAMESPACE)
 
         try:
@@ -98,6 +101,6 @@ class RoomsHandler(AuthenticatedHandler):
             raise HTTPError(400, "Corrupted JSON")
 
         rooms_data = self.application.rooms
-        rooms = yield rooms_data.list_rooms(gamespace, game_id, game_version, settings)
+        rooms = yield rooms_data.list_rooms(gamespace, game_name, game_version, settings)
         result = [room.dump() for room in rooms]
         self.dumps(result)

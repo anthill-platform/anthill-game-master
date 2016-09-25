@@ -81,10 +81,10 @@ class GameServer(object):
     SPAWN_TIMEOUT = 30
     CHECK_PERIOD = 60
 
-    def __init__(self, gs, game_id, game_version, name, room):
+    def __init__(self, gs, game_name, game_version, name, room):
         self.gs = gs
 
-        self.game_id = game_id
+        self.game_name = game_name
         self.game_version = game_version
 
         self.name = name
@@ -151,21 +151,23 @@ class GameServer(object):
 
         tornado.ioloop.IOLoop.current().spawn_callback(self.__check_status__)
 
-        # return the game settings to the game server that called the 'inited' callback
-        server_settings = self.room.server_settings()
-        raise Return(server_settings)
+        raise Return({
+            "status": "OK"
+        })
 
     @coroutine
     def __prepare__(self, room):
         room_settings = room.room_settings()
+        server_settings = room.server_settings()
+        game_settings = room.game_settings()
 
-        env = {}
+        env = {
+            "server:settings": ujson.dumps(server_settings, escape_forward_slashes=False)
+        }
 
         if isinstance(room_settings, dict):
             for key, value in room_settings.iteritems():
                 env["room:" + key] = ujson.dumps(value)
-
-        game_settings = room.game_settings()
 
         token = game_settings.get("token", {})
         authenticate = token.get("authenticate", False)

@@ -11,7 +11,7 @@ class GameError(Exception):
     pass
 
 
-class GameNotFound(Exception):
+class GameServerNotFound(Exception):
     pass
 
 
@@ -23,17 +23,23 @@ class GameVersionNotFound(Exception):
     pass
 
 
-class GameSettingsAdapter(object):
+class GameServerExists(Exception):
+    pass
+
+
+class GameServerAdapter(object):
     def __init__(self, data):
-        self.game_id = data.get("game_id")
+        self.name = data.get("game_server_name")
+        self.game_name = data.get("game_name")
+        self.game_server_id = data.get("game_server_id")
         self.server_host = data.get("server_host", "game-ctl")
-        self.schema = data.get("schema", GamesModel.DEFAULT_SERVER_SCHEME)
+        self.schema = data.get("schema", GameServersModel.DEFAULT_SERVER_SCHEME)
         self.max_players = data.get("max_players", 8)
         self.game_settings = data.get("game_settings", {})
         self.server_settings = data.get("server_settings", {})
 
 
-class GamesModel(Model):
+class GameServersModel(Model):
 
     DEFAULT_SERVER_SCHEME = {
         "type": "object",
@@ -42,7 +48,8 @@ class GamesModel(Model):
                 "type": "string",
                 "title": "A test Option",
                 "default": "test",
-                "description": "Please see 'Game Server Configuration Schema' at the bottom to configure options."
+                "description": "This allows to pass custom variables to the game servers "
+                               "depending on the game version (or not)."
             }
         },
         "options":
@@ -50,7 +57,7 @@ class GamesModel(Model):
             "disable_edit_json": True,
             "disable_properties": True
         },
-        "title": "Game Configuration"
+        "title": "Custom Game Server Configuration"
     }
 
     GAME_SETTINGS_SCHEME = {
@@ -193,18 +200,38 @@ class GamesModel(Model):
         return self.db
 
     def get_setup_tables(self):
-        return ["games", "game_versions"]
+        return ["game_servers", "game_versions"]
 
     @coroutine
-    def delete_game_version(self, gamespace_id, game_id, game_version):
+    def delete_game_version(self, gamespace_id, game_name, game_version, game_server_id):
         try:
             yield self.db.get(
                 """
                     DELETE FROM `game_versions`
-                    WHERE `gamespace_id`=%s AND `game_id`=%s AND `game_version`=%s
-                """, gamespace_id, game_id, game_version)
+                    WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s AND `game_server_id`=%s;
+                """, gamespace_id, game_name, game_version, game_server_id)
         except common.database.DatabaseError as e:
             raise GameVersionError("Failed to delete game:" + e.args[1])
+
+    @coroutine
+    def delete_game_server(self, gamespace_id, game_name, game_server_id):
+        try:
+            yield self.db.get(
+                """
+                    DELETE FROM `game_versions`
+                    WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_server_id`=%s;
+                """, gamespace_id, game_name, game_server_id)
+        except common.database.DatabaseError as e:
+            raise GameVersionError("Failed to delete game server version:" + e.args[1])
+
+        try:
+            yield self.db.get(
+                """
+                    DELETE FROM `game_servers`
+                    WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_server_id`=%s;
+                """, gamespace_id, game_name, game_server_id)
+        except common.database.DatabaseError as e:
+            raise GameVersionError("Failed to delete game server:" + e.args[1])
 
     @coroutine
     def get_all_versions_settings(self):
@@ -219,52 +246,66 @@ class GamesModel(Model):
 
         raise Return(result)
 
+    def default_game_settings(self):
+        return GameServerAdapter({})
+
     @coroutine
-    def get_game_host(self, gamespace_id, game_id):
+    def list_game_servers(self, gamespace_id, game_name):
         try:
-            result = yield self.db.get(
+            servers = yield self.db.query(
                 """
-                    SELECT `server_host`
-                    FROM `games`
-                    WHERE `gamespace_id`=%s AND `game_id`=%s
-                """, gamespace_id, game_id)
+                    SELECT *
+                    FROM `game_servers`
+                    WHERE `gamespace_id`=%s AND `game_name`=%s
+                """, gamespace_id, game_name)
         except common.database.DatabaseError as e:
             raise GameError("Failed to get game settings:" + e.args[1])
 
-        if result is None:
-            raise GameNotFound()
-
-        raise Return(result["server_host"])
-
-    def default_game_settings(self):
-        return GameSettingsAdapter({})
+        raise Return(map(GameServerAdapter, servers))
 
     @coroutine
-    def get_game_settings(self, gamespace_id, game_id):
+    def find_game_server(self, gamespace_id, game_name, game_server_name):
         try:
             result = yield self.db.get(
                 """
                     SELECT *
-                    FROM `games`
-                    WHERE `gamespace_id`=%s AND `game_id`=%s
-                """, gamespace_id, game_id)
+                    FROM `game_servers`
+                    WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_server_name`=%s
+                """, gamespace_id, game_name, game_server_name)
         except common.database.DatabaseError as e:
             raise GameError("Failed to get game settings:" + e.args[1])
 
         if result is None:
-            raise GameNotFound()
+            raise GameServerNotFound()
 
-        raise Return(GameSettingsAdapter(result))
+        raise Return(GameServerAdapter(result))
 
     @coroutine
-    def get_game_version_server_settings(self, gamespace_id, game_id, game_version):
+    def get_game_server(self, gamespace_id, game_name, game_server_id):
+        try:
+            result = yield self.db.get(
+                """
+                    SELECT *
+                    FROM `game_servers`
+                    WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_server_id`=%s
+                """, gamespace_id, game_name, game_server_id)
+        except common.database.DatabaseError as e:
+            raise GameError("Failed to get game settings:" + e.args[1])
+
+        if result is None:
+            raise GameServerNotFound()
+
+        raise Return(GameServerAdapter(result))
+
+    @coroutine
+    def get_version_game_server(self, gamespace_id, game_name, game_version, game_server_id):
         try:
             result = yield self.db.get(
                 """
                     SELECT `server_settings`
                     FROM `game_versions`
-                    WHERE `gamespace_id`=%s AND `game_id`=%s AND `game_version`=%s
-                """, gamespace_id, game_id, game_version)
+                    WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s AND `game_server_id`=%s
+                """, gamespace_id, game_name, game_version, game_server_id)
         except common.database.DatabaseError as e:
             raise GameVersionError("Failed to get game:" + e.args[1])
 
@@ -274,48 +315,51 @@ class GamesModel(Model):
         raise Return(result["server_settings"])
 
     @coroutine
-    def set_game_settings(self, gamespace_id, game_id, game_host, schema,
-                          max_players, game_settings, server_settings):
-
+    def create_game_server(self, gamespace_id, game_name, game_server_name, game_host, schema,
+                           max_players, game_settings, server_settings):
         try:
-            yield self.get_game_settings(gamespace_id, game_id)
-        except GameNotFound:
-            try:
-                yield self.db.insert(
-                    """
-                        INSERT INTO `games`
-                        (`game_id`, `gamespace_id`, `server_host`, `schema`,
-                            `max_players`, `game_settings`, `server_settings`)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s);
-                    """, game_id, gamespace_id, game_host, ujson.dumps(schema),
-                    max_players, ujson.dumps(game_settings), ujson.dumps(server_settings))
-            except common.database.DatabaseError as e:
-                raise GameError("Failed to insert game settings:" + e.args[1])
+            game_server_id = yield self.db.insert(
+                """
+                    INSERT INTO `game_servers`
+                    (`game_name`, `gamespace_id`, `game_server_name`, `server_host`, `schema`,
+                        `max_players`, `game_settings`, `server_settings`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+                """, game_name, gamespace_id, game_server_name, game_host, ujson.dumps(schema),
+                max_players, ujson.dumps(game_settings), ujson.dumps(server_settings))
+        except common.database.DuplicateError:
+            raise GameServerExists()
+        except common.database.DatabaseError as e:
+            raise GameError("Failed to insert game settings:" + e.args[1])
         else:
-            try:
-                yield self.db.execute(
-                    """
-                        UPDATE `games`
-                        SET `server_host`=%s, `schema`=%s,
-                            `max_players`=%s, `game_settings`=%s, `server_settings`=%s
-                        WHERE `game_id`=%s AND `gamespace_id`=%s;
-                    """, game_host, ujson.dumps(schema), max_players,
-                    ujson.dumps(game_settings), ujson.dumps(server_settings), game_id, gamespace_id)
-            except common.database.DatabaseError as e:
-                raise GameError("Failed to change game settings:" + e.args[1])
+            raise Return(game_server_id)
 
     @coroutine
-    def set_game_version_server_settings(self, gamespace_id, game_id, game_version, server_settings):
+    def update_game_server(self, gamespace_id, game_name, game_server_id, game_server_name, game_host,
+                           schema, max_players, game_settings, server_settings):
         try:
-            yield self.get_game_version_server_settings(gamespace_id, game_id, game_version)
+            yield self.db.execute(
+                """
+                    UPDATE `game_servers`
+                    SET `server_host`=%s, `schema`=%s, `game_server_name`=%s,
+                        `max_players`=%s, `game_settings`=%s, `server_settings`=%s
+                    WHERE `game_name`=%s AND `gamespace_id`=%s AND `game_server_id`=%s;
+                """, game_host, ujson.dumps(schema), game_server_name, max_players,
+                ujson.dumps(game_settings), ujson.dumps(server_settings), game_name, gamespace_id, game_server_id)
+        except common.database.DatabaseError as e:
+            raise GameError("Failed to change game settings:" + e.args[1])
+
+    @coroutine
+    def set_version_game_server(self, gamespace_id, game_name, game_version, game_server_id, server_settings):
+        try:
+            yield self.get_version_game_server(gamespace_id, game_name, game_version, game_server_id)
         except GameVersionNotFound:
             try:
                 yield self.db.insert(
                     """
                         INSERT INTO `game_versions`
-                        (`game_id`, `game_version`, `gamespace_id`, `server_settings`)
-                        VALUES (%s, %s, %s, %s);
-                    """, game_id, game_version, gamespace_id, ujson.dumps(server_settings))
+                        (`game_name`, `game_version`, `game_server_id`, `gamespace_id`, `server_settings`)
+                        VALUES (%s, %s, %s, %s, %s);
+                    """, game_name, game_version, game_server_id, gamespace_id, ujson.dumps(server_settings))
             except common.database.DatabaseError as e:
                 raise GameVersionError("Failed to insert config:" + e.args[1])
         else:
@@ -324,7 +368,7 @@ class GamesModel(Model):
                     """
                         UPDATE `game_versions`
                         SET `server_settings`=%s
-                        WHERE `game_id`=%s AND `game_version`=%s AND `gamespace_id`=%s;
-                    """, ujson.dumps(server_settings), game_id, game_version, gamespace_id)
+                        WHERE `game_name`=%s AND `game_version`=%s AND `gamespace_id`=%s AND `game_server_id`=%s;
+                    """, ujson.dumps(server_settings), game_name, game_version, gamespace_id, game_server_id)
             except common.database.DatabaseError as e:
                 raise GameVersionError("Failed to update config:" + e.args[1])
