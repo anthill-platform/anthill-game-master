@@ -161,8 +161,11 @@ class GameServer(object):
         server_settings = room.server_settings()
         game_settings = room.game_settings()
 
+        max_players = game_settings.get("max_players", 8)
+
         env = {
-            "server:settings": ujson.dumps(server_settings, escape_forward_slashes=False)
+            "server:settings": ujson.dumps(server_settings, escape_forward_slashes=False),
+            "game:max_players": str(max_players)
         }
 
         if isinstance(room_settings, dict):
