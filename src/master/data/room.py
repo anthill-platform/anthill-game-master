@@ -14,7 +14,11 @@ class ApproveFailed(Exception):
 
 
 class RoomError(Exception):
-    pass
+    def __init__(self, message):
+        self.message = message
+
+    def __str__(self):
+        return self.message
 
 
 class RoomNotFound(Exception):
@@ -271,6 +275,23 @@ class RoomsModel(Model):
         raise Return(RoomAdapter(room))
 
     @coroutine
+    def update_room_settings(self, gamespace, room_id, room_settings):
+
+        if not isinstance(room_settings, dict):
+            raise RoomError("Room settings is not a dict")
+
+        try:
+            yield self.db.execute(
+                """
+                UPDATE `rooms`
+                SET `settings`=%s
+                WHERE `gamespace_id`=%s AND `room_id`=%s
+                """, ujson.dumps(room_settings), gamespace, room_id
+            )
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to update a room: " + e.args[1])
+
+    @coroutine
     def get_room(self, gamespace, room_id):
         try:
             room = yield self.db.get(
@@ -302,8 +323,7 @@ class RoomsModel(Model):
         except InternalError as e:
             raise RoomError("Failed to spawn a new game server: " + str(e.code) + " " + e.body)
 
-        location = result["location"]
-        raise Return(location)
+        raise Return(result)
 
     @coroutine
     def join_room(self, gamespace, room_id, account_id, key, access_token, db):
@@ -410,9 +430,13 @@ class RoomsModel(Model):
     @coroutine
     def spawn_server(self, gamespace, game_id, game_version, room_id, server_host, settings):
 
-        location = yield self.instantiate(gamespace, game_id, game_version, room_id, server_host, settings)
+        result = yield self.instantiate(gamespace, game_id, game_version, room_id, server_host, settings)
+
+        if "location" not in result:
+            raise RoomError("No location in result.")
+
+        location = result["location"]
+
         yield self.assign_location(gamespace, room_id, location)
 
-        raise Return({
-            "location": location
-        })
+        raise Return(result)

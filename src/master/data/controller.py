@@ -4,7 +4,7 @@ from tornado.gen import coroutine, Return
 import logging
 from common.internal import Internal, InternalError
 
-from room import ApproveFailed
+from room import ApproveFailed, RoomError
 
 
 class ControllerError(Exception):
@@ -43,6 +43,17 @@ class ControllersClientModel(object):
             raise Return({
                 "access_token": access_token
             })
+
+    @coroutine
+    def update_settings(self, gamespace, room_id, settings, **payload):
+
+        logging.info("Room {0} settings updated".format(room_id))
+        try:
+            yield self.rooms.update_room_settings(gamespace, room_id, settings)
+        except RoomError as e:
+            raise ControllerError(e.message)
+        else:
+            raise Return({})
 
     @coroutine
     def left(self, gamespace, room_id, key=None, **payload):

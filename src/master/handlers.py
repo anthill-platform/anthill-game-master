@@ -49,7 +49,7 @@ class JoinHandler(AuthenticatedHandler):
         try:
             yield player.init()
         except PlayerError as e:
-            raise HTTPError(400, e.message)
+            raise HTTPError(e.code, e.message)
         except GameServerNotFound:
             raise HTTPError(404, "No such game server")
 
@@ -58,7 +58,7 @@ class JoinHandler(AuthenticatedHandler):
         except RoomNotFound as e:
             raise HTTPError(404, "No such room found")
         except PlayerError as e:
-            raise HTTPError(400, e.message)
+            raise HTTPError(e.code, e.message)
 
         self.dumps(result)
 
@@ -82,14 +82,14 @@ class CreateHandler(AuthenticatedHandler):
         try:
             yield player.init()
         except PlayerError as e:
-            raise HTTPError(400, e.message)
+            raise HTTPError(e.code, e.message)
         except GameServerNotFound:
             raise HTTPError(404, "No such game server")
 
         try:
             result = yield player.create(settings)
         except PlayerError as e:
-            raise HTTPError(400, e.message)
+            raise HTTPError(e.code, e.message)
 
         self.dumps(result)
 

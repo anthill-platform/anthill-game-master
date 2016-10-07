@@ -70,7 +70,7 @@ class GameServersData(object):
         sock_path = os.path.join(self.sock_path, name)
 
         try:
-            init = yield instance.spawn(app_path, binary, sock_path, arguments, env, room)
+            settings = yield instance.spawn(app_path, binary, sock_path, arguments, env, room)
         except server.SpawnError as e:
             logging.error("Failed to spawn server instance: " + e.message)
             import sys
@@ -80,9 +80,11 @@ class GameServersData(object):
         logging.info("New server instance spawned: " + name)
 
         result = {
-            "host": self.app.get_gs_host(),
-            "ports": instance.ports,
-            "init": init or {}
+            "location": {
+                "host": self.app.get_gs_host(),
+                "ports": instance.ports
+            },
+            "settings": settings
         }
 
         raise Return(result)

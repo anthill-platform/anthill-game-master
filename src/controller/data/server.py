@@ -165,12 +165,9 @@ class GameServer(object):
 
         env = {
             "server:settings": ujson.dumps(server_settings, escape_forward_slashes=False),
+            "room:settings": ujson.dumps(room_settings),
             "game:max_players": str(max_players)
         }
-
-        if isinstance(room_settings, dict):
-            for key, value in room_settings.iteritems():
-                env["room:" + key] = ujson.dumps(value)
 
         token = game_settings.get("token", {})
         authenticate = token.get("authenticate", False)
@@ -270,12 +267,12 @@ class GameServer(object):
                 callback(SpawnError("Stopped before 'inited' command received."))
 
             @coroutine
-            def inited(*args, **kwargs):
+            def inited(settings=None):
                 self.__clear_handle__("inited")
                 self.__clear_handle__("stopped")
 
                 # call it, the message will be passed
-                callback(*args, **kwargs)
+                callback(settings or {})
 
                 # we're done initializing
                 res_ = yield self.inited()
@@ -289,16 +286,16 @@ class GameServer(object):
         # wait, until the 'init' command is received
         # or, the server is stopped (that's bad) earlier
         try:
-            result = yield with_timeout(
+            settings = yield with_timeout(
                 datetime.timedelta(seconds=GameServer.SPAWN_TIMEOUT),
                 Task(wait))
 
             # if the result is an Exception, that means
             # the 'wait' told us so
-            if isinstance(result, Exception):
-                raise result
+            if isinstance(settings, Exception):
+                raise settings
 
-            raise Return(result)
+            raise Return(settings)
         except TimeoutError:
             self.__notify__("Timeout to spawn.")
             yield self.terminate(True)

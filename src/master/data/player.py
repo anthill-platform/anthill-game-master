@@ -54,13 +54,13 @@ class Player(object):
             self.server_settings = self.gs.server_settings
 
             if self.server_settings is None:
-                raise PlayerError("No default version configuration")
+                raise PlayerError(500, "No default version configuration")
 
     @coroutine
     def create(self, room_settings, key=None):
 
         if not isinstance(room_settings, dict):
-            raise PlayerError("Settings is not a dict")
+            raise PlayerError(400, "Settings is not a dict")
 
         room_settings = {
             key: value
@@ -71,7 +71,7 @@ class Player(object):
         try:
             limit = yield self.app.ratelimit.limit("create_room", self.account_id)
         except RateLimitExceeded:
-            raise PlayerError("Too many requests")
+            raise PlayerError(429, "Too many requests")
         else:
             if not key:
                 key = self.generate_key()
@@ -103,17 +103,23 @@ class Player(object):
                 yield limit.rollback()
                 raise e
 
-            location = result["location"]
+            updated_room_settings = result.get("settings")
+
+            if updated_room_settings:
+                room_settings.update(updated_room_settings)
+
+                yield self.rooms.update_room_settings(self.gamespace, self.room_id, room_settings)
+
+            result.update({
+                "id": self.room_id,
+                "slot": self.record_id,
+                "key": key
+            })
 
             # call a joined coroutine in parallel
             tornado.ioloop.IOLoop.current().spawn_callback(self.joined)
 
-            raise Return({
-                "id": self.room_id,
-                "slot": self.record_id,
-                "location": location,
-                "key": key
-            })
+            raise Return(result)
 
     @coroutine
     def join(self, search_settings, auto_create=False, create_room_settings=None):
@@ -189,7 +195,8 @@ class Player(object):
 
 
 class PlayerError(Exception):
-    def __init__(self, message):
+    def __init__(self, code, message):
+        self.code = code
         self.message = message
 
 

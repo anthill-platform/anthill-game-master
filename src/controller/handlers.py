@@ -17,12 +17,8 @@ class InternalHandler(object):
         room = rooms.new(gamespace, room_id, settings)
 
         try:
-            location = yield gs.spawn(game_id, game_version, room)
+            result = yield gs.spawn(game_id, game_version, room)
         except SpawnError as e:
             raise InternalError(500, "Failed to spawn: " + e.message)
-
-        result = {
-            "location": location
-        }
 
         raise Return(result)
