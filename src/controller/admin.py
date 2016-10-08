@@ -41,23 +41,18 @@ class DebugController(a.StreamAdminController):
         result = [DebugController.serialize_server(server) for server_name, server in servers.iteritems()]
         yield self.rpc(self, "servers", result)
 
-        self.sub.subscribe(self.gs.pub, ["new_server", "server_removed", "server_status"])
+        self.sub.subscribe(self.gs.pub, ["new_server", "server_removed", "server_updated"])
 
     def scopes_stream(self):
         return ["game_admin"]
 
     @coroutine
     def search_logs(self, data):
-        servers = self.gs.get_servers()
 
-        result = [
-            server_name
-            for server_name, server in servers.iteritems()
-            if data in server.get_log()
-        ]
+        servers = self.gs.search(logs=data)
 
         raise Return({
-            "servers": result
+            "servers": [server_name for server_name, instance in servers.iteritems()]
         })
 
     @staticmethod
@@ -65,6 +60,7 @@ class DebugController(a.StreamAdminController):
         return {
             "status": server.status,
             "game": server.game_name,
+            "room_settings": server.room.room_settings(),
             "version": server.game_version,
             "name": server.name
         }
@@ -75,8 +71,8 @@ class DebugController(a.StreamAdminController):
         yield self.rpc(self, "server_removed", **DebugController.serialize_server(server))
 
     @coroutine
-    def server_status(self, name, status):
-        yield self.rpc(self, "server_status", name=name, status=status)
+    def server_updated(self, server):
+        yield self.rpc(self, "server_updated", **DebugController.serialize_server(server))
 
     @coroutine
     def subscribe_logs(self, server):

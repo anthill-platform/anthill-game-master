@@ -32,23 +32,36 @@ class GameServersData(object):
     def get_servers(self):
         return self.servers
 
+    def search(self, logs=None):
+
+        result = {}
+
+        for server_name, instance in self.get_servers().iteritems():
+            if logs and instance.has_log(logs):
+                result[server_name] = instance
+                continue
+
+            pass
+
+        return result
+
     @coroutine
-    def instantiate(self, name, game_id, game_version, room):
-        gs = server.GameServer(self, game_id, game_version, name, room)
+    def instantiate(self, name, game_id, game_version, game_server_name, room):
+        gs = server.GameServer(self, game_id, game_version, game_server_name, name, room)
         self.servers[name] = gs
 
-        self.sub.subscribe(gs.pub, ["server_status"])
+        self.sub.subscribe(gs.pub, ["server_updated"])
         self.pub.notify("new_server", server=gs)
 
         raise Return(gs)
 
     @coroutine
-    def server_status(self, name, status):
-        self.pub.notify("server_status", name=name, status=status)
+    def server_updated(self, server):
+        self.pub.notify("server_updated", server=server)
 
     @coroutine
-    def spawn(self, game_id, game_version, room):
-        name = "game_" + game_id + "_" + str(room.id())
+    def spawn(self, game_name, game_version, game_server_name, room):
+        name = game_name + "_" + game_server_name + "_" + str(room.id())
 
         game_settings = room.game_settings()
 
@@ -64,9 +77,9 @@ class GameServersData(object):
             if "key" in e and "value" in e
         }
 
-        instance = yield self.instantiate(name, game_id, game_version, room)
+        instance = yield self.instantiate(name, game_name, game_version, game_server_name, room)
 
-        app_path = os.path.join(self.binaries_path, game_id, game_version)
+        app_path = os.path.join(self.binaries_path, game_name, game_version)
         sock_path = os.path.join(self.sock_path, name)
 
         try:
@@ -91,7 +104,7 @@ class GameServersData(object):
 
     @coroutine
     def stopped(self, instance):
-        self.sub.unsubscribe(instance.pub, ["server_status"])
+        self.sub.unsubscribe(instance.pub, ["server_updated"])
         self.pub.notify("server_removed", server=instance)
 
         def remove_server():

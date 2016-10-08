@@ -92,7 +92,7 @@ class Player(object):
                 }
 
                 result = yield self.rooms.spawn_server(
-                    self.gamespace, self.game_name, self.game_version,
+                    self.gamespace, self.game_name, self.game_version, self.game_server_name,
                     self.room_id, self.gs.server_host, combined_settings
                 )
             except RoomError as e:
@@ -137,9 +137,6 @@ class Player(object):
             self.record_id, self.room = yield self.rooms.find_and_join_room(
                 self.gamespace, self.game_name, self.game_version, self.gs.game_server_id,
                 self.account_id, key, self.access_token, search_settings)
-            self.room_id = self.room["room_id"]
-
-            location = self.room["location"]
 
         except RoomNotFound as e:
             if auto_create:
@@ -150,6 +147,11 @@ class Player(object):
 
             else:
                 raise e
+        else:
+            self.room_id = self.room.room_id
+
+            location = self.room.location
+            settings = self.room.room_settings
 
         # call a joined coroutine in parallel
         tornado.ioloop.IOLoop.current().spawn_callback(self.joined)
@@ -158,6 +160,7 @@ class Player(object):
             "id": self.room_id,
             "slot": self.record_id,
             "location": location,
+            "settings": settings,
             "key": key
         })
 

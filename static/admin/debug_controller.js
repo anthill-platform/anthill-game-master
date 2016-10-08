@@ -165,6 +165,10 @@
                             value);
 
                         return node;
+                    },
+                    "json_view": function (value, args)
+                    {
+                        return new JSONFormatter(JSON.parse(value), 1).render();
                     }
                 };
 
@@ -226,6 +230,11 @@
                             "value": server.version
                         },
                         {
+                            "title": "Room Settings",
+                            "value": JSON.stringify(server.room_settings),
+                            "decorator": "json_view"
+                        },
+                        {
                             "title": "Status",
                             "value": server.status,
                             "decorator": "icon",
@@ -256,11 +265,6 @@
             });
 
             this.ws.handle("server_updated", function(payload)
-            {
-                zis.update_server(payload);
-            });
-            
-            this.ws.handle("server_status", function(payload)
             {
                 zis.update_server(payload);
             });

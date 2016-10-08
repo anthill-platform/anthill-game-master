@@ -44,6 +44,9 @@ class Room(object):
 
             raise Return(result)
 
+    def update_room_settings(self, settings):
+        self.room_settings().update(settings)
+
     def room_settings(self):
         return self.settings["room"]
 

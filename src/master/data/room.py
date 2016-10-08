@@ -28,7 +28,7 @@ class RoomNotFound(Exception):
 class RoomAdapter(object):
     def __init__(self, data):
         self.room_id = data.get("room_id")
-        self.room_settings = data.get("room_settings", {})
+        self.room_settings = data.get("settings", {})
         self.players = data.get("players", 0)
         self.location = data.get("location", {})
         self.game_id = data.get("game_id")
@@ -240,7 +240,7 @@ class RoomsModel(Model):
         except common.database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
 
-        result = (record_id, room)
+        result = (record_id, RoomAdapter(room))
 
         raise Return(result)
 
@@ -309,13 +309,15 @@ class RoomsModel(Model):
         raise Return(RoomAdapter(room))
 
     @coroutine
-    def instantiate(self, gamespace, game_id, game_version, room_id, server_host, settings):
+    def instantiate(self, gamespace, game_id, game_version, game_server_name,
+                    room_id, server_host, settings):
 
         try:
             result = yield self.internal.request(
                 server_host, "spawn",
                 game_id=game_id,
                 game_version=game_version,
+                game_server_name=game_server_name,
                 room_id=room_id,
                 gamespace=gamespace,
                 settings=settings)
@@ -428,9 +430,11 @@ class RoomsModel(Model):
             raise RoomError("Failed to leave a room: " + e.args[1])
 
     @coroutine
-    def spawn_server(self, gamespace, game_id, game_version, room_id, server_host, settings):
+    def spawn_server(self, gamespace, game_id, game_version, game_server_name,
+                     room_id, server_host, settings):
 
-        result = yield self.instantiate(gamespace, game_id, game_version, room_id, server_host, settings)
+        result = yield self.instantiate(gamespace, game_id, game_version, game_server_name,
+                                        room_id, server_host, settings)
 
         if "location" not in result:
             raise RoomError("No location in result.")

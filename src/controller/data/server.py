@@ -81,11 +81,12 @@ class GameServer(object):
     SPAWN_TIMEOUT = 30
     CHECK_PERIOD = 60
 
-    def __init__(self, gs, game_name, game_version, name, room):
+    def __init__(self, gs, game_name, game_version, game_server_name, name, room):
         self.gs = gs
 
         self.game_name = game_name
         self.game_version = game_version
+        self.game_server_name = game_server_name
 
         self.name = name
         self.room = room
@@ -118,10 +119,13 @@ class GameServer(object):
     def is_running(self):
         return self.status == GameServer.STATUS_RUNNING
 
+    def __notify_updated__(self):
+        self.pub.notify("server_updated", server=self)
+
     def set_status(self, status):
         self.status = status
         self.log.flush()
-        self.pub.notify("server_status", name=self.name, status=status)
+        self.__notify_updated__()
 
     @coroutine
     def __check_status__(self):
@@ -145,7 +149,10 @@ class GameServer(object):
                         yield self.terminate(False)
 
     @coroutine
-    def inited(self):
+    def inited(self, settings):
+
+        self.room.update_room_settings(settings)
+
         self.__notify__("Inited.")
         self.set_status(GameServer.STATUS_RUNNING)
 
@@ -275,7 +282,7 @@ class GameServer(object):
                 callback(settings or {})
 
                 # we're done initializing
-                res_ = yield self.inited()
+                res_ = yield self.inited(settings)
                 raise Return(res_)
 
             # catch the init message
@@ -314,6 +321,9 @@ class GameServer(object):
 
     def get_log(self):
         return self.log.get_log()
+
+    def has_log(self, text):
+        return text in self.log.get_log()
 
     def __recv__(self):
         if self.status in [GameServer.STATUS_STOPPED]:
