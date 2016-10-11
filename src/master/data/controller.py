@@ -69,12 +69,12 @@ class ControllersClientModel(object):
             raise Return({})
 
     @coroutine
-    def received(self, gamespace, room_id, action, payload):
+    def received(self, gamespace, room_id, action, args, kwargs):
         receiver = getattr(self, action)
 
         if receiver:
             try:
-                result = yield receiver(gamespace, room_id, **payload)
+                result = yield receiver(gamespace, room_id, *args, **kwargs)
             except TypeError as e:
                 raise ControllerError("Failed to call action '{0}': {1}".format(action, e.message))
             raise Return(result)

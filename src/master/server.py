@@ -87,6 +87,7 @@ class GameMasterServer(common.server.Server):
     def get_handlers(self):
         return [
             (r"/rooms/(.*)/(.*)/(.*)", h.RoomsHandler),
+            (r"/room/(.*)/(.*)/join", h.JoinRoomHandler),
             (r"/join/(.*)/(.*)/(.*)", h.JoinHandler),
             (r"/create/(.*)/(.*)/(.*)", h.CreateHandler)
         ]

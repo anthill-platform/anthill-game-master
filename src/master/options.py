@@ -95,6 +95,6 @@ define("rate_cache_max_connections",
 # Keys
 
 define("rate_create_room",
-       default=(2, 60),
+       default=(5, 60),
        help="A limit for room creation for user tuple: (amount, time)",
        type=tuple)

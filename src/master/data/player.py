@@ -36,9 +36,6 @@ class Player(object):
         self.record_id = None
         self.access_token = access_token
 
-    def generate_key(self):
-        return str(self.account_id) + "_" + random_string(60)
-
     @coroutine
     def init(self):
         self.gs = yield self.gameservers.find_game_server(
@@ -57,7 +54,7 @@ class Player(object):
                 raise PlayerError(500, "No default version configuration")
 
     @coroutine
-    def create(self, room_settings, key=None):
+    def create(self, room_settings):
 
         if not isinstance(room_settings, dict):
             raise PlayerError(400, "Settings is not a dict")
@@ -73,14 +70,9 @@ class Player(object):
         except RateLimitExceeded:
             raise PlayerError(429, "Too many requests")
         else:
-            if not key:
-                key = self.generate_key()
-
-            self.record_id, self.room_id = yield self.rooms.create_and_join_room(
+            self.record_id, key, self.room_id = yield self.rooms.create_and_join_room(
                 self.gamespace, self.game_name, self.game_version,
-                self.gs, room_settings, self.account_id,
-                key, self.access_token
-            )
+                self.gs, room_settings, self.account_id, self.access_token)
 
             logging.info("Created a room: '{0}'".format(self.room_id))
 
@@ -116,9 +108,6 @@ class Player(object):
                 "key": key
             })
 
-            # call a joined coroutine in parallel
-            tornado.ioloop.IOLoop.current().spawn_callback(self.joined)
-
             raise Return(result)
 
     @coroutine
@@ -131,18 +120,16 @@ class Player(object):
                settings
         """
 
-        key = self.generate_key()
-
         try:
-            self.record_id, self.room = yield self.rooms.find_and_join_room(
+            self.record_id, key, self.room = yield self.rooms.find_and_join_room(
                 self.gamespace, self.game_name, self.game_version, self.gs.game_server_id,
-                self.account_id, key, self.access_token, search_settings)
+                self.account_id, self.access_token, search_settings)
 
         except RoomNotFound as e:
             if auto_create:
                 logging.info("No rooms found, creating one")
 
-                result = yield self.create(create_room_settings or {}, key=key)
+                result = yield self.create(create_room_settings or {})
                 raise Return(result)
 
             else:
@@ -153,9 +140,6 @@ class Player(object):
             location = self.room.location
             settings = self.room.room_settings
 
-        # call a joined coroutine in parallel
-        tornado.ioloop.IOLoop.current().spawn_callback(self.joined)
-
         raise Return({
             "id": self.room_id,
             "slot": self.record_id,
@@ -163,28 +147,6 @@ class Player(object):
             "settings": settings,
             "key": key
         })
-
-    @coroutine
-    def joined(self):
-        """
-        Called asynchronously when user joined the room
-        Waits a while, and then leaves the room, if the join reservation
-            was not approved by game-controller.
-        """
-
-        # wait a while
-        yield sleep(Player.AUTO_REMOVE_TIME)
-
-        # and then try to remove a player reservation
-        if (self.record_id is None) or (self.room_id is None):
-            return
-
-        result = yield self.rooms.leave_room_reservation(self.gamespace, self.room_id, self.account_id)
-
-        if result:
-            logging.warning("Removed player reservation: room '{0}' player '{1}' gamespace '{2}'".format(
-                self.room_id, self.account_id, self.gamespace
-            ))
 
     @coroutine
     def leave(self, remove_room=False):

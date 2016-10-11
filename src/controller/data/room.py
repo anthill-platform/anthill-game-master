@@ -33,18 +33,20 @@ class Room(object):
                 room_id=self.id(),
                 action=method,
                 gamespace=self.gamespace,
-                payload=kwargs)
+                args=args,
+                kwargs=kwargs)
 
         except InternalError as e:
             logging.error("Failed to notify an action: " + str(e.code) + ": " + e.body)
         else:
             # if there's a method with such action name, call it
-            if hasattr(self, method):
+            if (not method.startswith("_")) and hasattr(self, method):
                 yield getattr(self, method)(result, *args, **kwargs)
 
             raise Return(result)
 
-    def update_room_settings(self, settings):
+    @coroutine
+    def update_settings(self, result, settings, *args, **kwargs):
         self.room_settings().update(settings)
 
     def room_settings(self):

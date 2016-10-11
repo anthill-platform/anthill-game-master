@@ -4,8 +4,9 @@ CREATE TABLE `players` (
   `account_id` int(11) NOT NULL,
   `room_id` int(11) NOT NULL,
   `state` enum('RESERVED','JOINED') NOT NULL DEFAULT 'RESERVED',
-  `joined_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `key` varchar(64) NOT NULL DEFAULT '',
   `access_token` mediumtext NOT NULL,
-  PRIMARY KEY (`record_id`)
+  PRIMARY KEY (`record_id`),
+  KEY `room_id` (`room_id`),
+  KEY `key` (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

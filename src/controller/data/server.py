@@ -149,9 +149,13 @@ class GameServer(object):
                         yield self.terminate(False)
 
     @coroutine
+    def update_settings(self, result, settings, *args, **kwargs):
+        self.__notify_updated__()
+
+    @coroutine
     def inited(self, settings):
 
-        self.room.update_room_settings(settings)
+        self.room.update_settings({}, settings)
 
         self.__notify__("Inited.")
         self.set_status(GameServer.STATUS_RUNNING)
@@ -378,6 +382,10 @@ class GameServer(object):
             response = yield self.handlers[method](*args, **kwargs)
         else:
             response = yield self.room.notify(method, *args, **kwargs)
+
+            # if there's a method with such action name, call it
+            if (not method.startswith("_")) and hasattr(self, method):
+                yield getattr(self, method)(response, *args, **kwargs)
 
         raise Return(response or {})
 
