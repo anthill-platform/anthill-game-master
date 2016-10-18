@@ -29,7 +29,7 @@ class RoomNotFound(Exception):
 
 class RoomAdapter(object):
     def __init__(self, data):
-        self.room_id = data.get("room_id")
+        self.room_id = str(data.get("room_id"))
         self.room_settings = data.get("settings", {})
         self.players = data.get("players", 0)
         self.location = data.get("location", {})
@@ -40,7 +40,7 @@ class RoomAdapter(object):
     def dump(self):
         return {
             "id": self.room_id,
-            "room_settings": self.room_settings,
+            "settings": self.room_settings,
             "players": self.players,
             "location": self.location,
             "game_name": self.game_name,

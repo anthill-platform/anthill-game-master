@@ -140,5 +140,10 @@ class RoomsHandler(AuthenticatedHandler):
 
         rooms_data = self.application.rooms
         rooms = yield rooms_data.list_rooms(gamespace, game_name, game_version, game_server_id, settings)
-        result = [room.dump() for room in rooms]
-        self.dumps(result)
+
+        self.dumps({
+            "rooms": [
+                room.dump()
+                for room in rooms
+                ]
+        })
