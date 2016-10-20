@@ -3,7 +3,6 @@ CREATE TABLE `game_servers` (
   `gamespace_id` int(11) NOT NULL,
   `game_name` varchar(64) NOT NULL,
   `game_server_name` varchar(255) NOT NULL DEFAULT '',
-  `server_host` varchar(255) NOT NULL DEFAULT '',
   `schema` json NOT NULL,
   `max_players` int(11) NOT NULL,
   `game_settings` json NOT NULL,

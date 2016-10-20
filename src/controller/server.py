@@ -32,6 +32,11 @@ class GameControllerServer(common.server.Server):
     def get_internal_handler(self):
         return h.InternalHandler(self)
 
+    def get_handlers(self):
+        return [
+            (r"/spawn", h.SpawnHandler)
+        ]
+
     def get_admin_stream(self):
         return {
             "debug": admin.DebugController

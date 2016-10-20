@@ -6,7 +6,10 @@ import common.admin as a
 from common.environment import AppNotFound
 
 from data.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
-from data.server import ServerNotFound
+from data.host import HostNotFound, HostError
+
+from geoip import geolite2
+import socket
 
 
 class ApplicationController(a.AdminController):
@@ -90,7 +93,6 @@ class GameServerController(a.AdminController):
             "max_players": gs.max_players,
             "game_settings": gs.game_settings,
             "server_settings": gs.server_settings,
-            "server_host": gs.server_host,
             "game_server_name": gs.name,
             "schema": gs.schema
         }
@@ -115,9 +117,6 @@ class GameServerController(a.AdminController):
                 "server_settings": a.field(
                     "The configuration would be send to spawned game server instance as a JSON.",
                     "dorn", "primary", "non-empty", schema=data["schema"], order=2),
-                "server_host": a.field(
-                    "Game controller service ID (to be discovered by discovery service)",
-                    "text", "primary", "non-empty", order=3),
                 "max_players": a.field("Max players per room", "text", "primary", "number", order=4),
                 "schema": a.field(
                     "Game Server Configuration Schema", "json", "primary", "non-empty", order=5)
@@ -165,7 +164,7 @@ class GameServerController(a.AdminController):
             record_id=game_name)
 
     @coroutine
-    def update(self, game_server_name, server_host, schema, max_players, game_settings, server_settings):
+    def update(self, game_server_name, schema, max_players, game_settings, server_settings):
 
         game_server_id = self.context.get("game_server_id")
         game_name = self.context.get("game_name")
@@ -191,7 +190,7 @@ class GameServerController(a.AdminController):
 
         try:
             yield gameservers.update_game_server(
-                self.gamespace, game_name, game_server_id, game_server_name, server_host,
+                self.gamespace, game_name, game_server_id, game_server_name,
                 schema, max_players, game_settings, server_settings)
         except GameError as e:
             raise a.ActionError("Failed: " + e.message)
@@ -218,7 +217,6 @@ class NewGameServerController(a.AdminController):
         result = {
             "app_name": app["title"],
             "schema": GameServersModel.DEFAULT_SERVER_SCHEME,
-            "server_host": "game-ctl",
             "max_players": "8"
         }
 
@@ -232,7 +230,6 @@ class NewGameServerController(a.AdminController):
                 "max_players": gs.max_players,
                 "game_settings": gs.game_settings,
                 "server_settings": gs.server_settings,
-                "server_host": gs.server_host,
                 "game_server_name": gs.name,
                 "schema": gs.schema
             })
@@ -254,9 +251,6 @@ class NewGameServerController(a.AdminController):
                 "game_settings": a.field(
                     "Game Configuration", "dorn",
                     "primary", "non-empty", schema=GameServersModel.GAME_SETTINGS_SCHEME, order=1),
-                "server_host": a.field(
-                    "Game controller service ID (to be discovered by discovery service)",
-                    "text", "primary", "non-empty", order=3),
                 "max_players": a.field("Max players per room", "text", "primary", "number", order=4),
                 "schema": a.field(
                     "Custom Game Server Configuration Schema", "json", "primary", "non-empty", order=5)
@@ -276,7 +270,7 @@ class NewGameServerController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def create(self, game_server_name, server_host, schema, max_players, game_settings):
+    def create(self, game_server_name, schema, max_players, game_settings):
 
         game_name = self.context.get("game_name")
 
@@ -300,7 +294,7 @@ class NewGameServerController(a.AdminController):
 
         try:
             game_server_id = yield gameservers.create_game_server(
-                self.gamespace, game_name, game_server_name, server_host,
+                self.gamespace, game_name, game_server_name,
                 schema, max_players, game_settings, {})
         except GameError as e:
             raise a.ActionError("Failed: " + e.message)
@@ -543,41 +537,41 @@ class DebugControllerAction(a.StreamAdminController):
 
     @coroutine
     def prepared(self, server):
-        servers = self.application.servers
+        hosts = self.application.hosts
 
         try:
-            server_data = yield servers.get_server(server)
-        except ServerNotFound as e:
+            host = yield hosts.get_host(server)
+        except HostNotFound as e:
             raise a.ActionError("Server not found: " + str(server))
 
-        internal_location = server_data["internal_location"]
-
-        raise a.RedirectStream("debug", internal_location)
+        raise a.RedirectStream("debug", host.internal_location)
 
 
-class DebugServerController(a.AdminController):
+class DebugHostController(a.AdminController):
     @coroutine
-    def get(self, server_id):
+    def get(self, host_id):
 
-        servers = self.application.servers
+        hosts = self.application.hosts
 
         try:
-            server = yield servers.get_server(server_id)
-        except ServerNotFound:
+            host = yield hosts.get_host(host_id)
+        except HostNotFound:
             raise a.ActionError("Server not found")
 
-        raise a.Return({})
+        raise a.Return({
+            "host": host
+        })
 
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("servers", "Servers"),
-                a.link("server", "Server '" + str(self.context.get("server_id")) + "'",
-                       server_id=self.context.get("server_id"))
+                a.link("hosts", "Hosts"),
+                a.link("host", data["host"].name,
+                       host_id=self.context.get("host_id"))
             ], "Debug"),
-            a.script("static/admin/debug_controller.js", server=self.context.get("server_id")),
+            a.script("static/admin/debug_controller.js", server=self.context.get("host_id")),
             a.links("Navigate", [
-                a.link("server", "Go back", server_id=self.context.get("server_id"))
+                a.link("server", "Go back", host_id=self.context.get("host_id"))
             ])
         ]
 
@@ -588,21 +582,23 @@ class DebugServerController(a.AdminController):
         return ["game_admin"]
 
 
-class NewServerController(a.AdminController):
+class NewHostController(a.AdminController):
     @coroutine
-    def create(self, internal_location):
-        servers = self.application.servers
-        server_id = yield servers.new_server(internal_location)
+    def create(self, name, internal_location, host_default="false"):
+        hosts = self.application.hosts
+        host_id = yield hosts.new_host(name, internal_location, host_default == "true")
 
         raise a.Redirect(
-            "server",
-            message="New server has been created",
-            server_id=server_id)
+            "host",
+            message="New host has been created",
+            host_id=host_id)
 
     def render(self, data):
         return [
-            a.form("New server", fields={
-                "internal_location": a.field("Internal location (for debug purposes)", "text", "primary", "non-empty"),
+            a.form("New host", fields={
+                "name": a.field("Host name", "text", "primary", "non-empty", order=1),
+                "internal_location": a.field("Internal location", "text", "primary", "non-empty", order=2),
+                "host_default": a.field("Is Default?", "switch", "primary", "non-empty", order=3),
             }, methods={
                 "create": a.method("Create", "primary")
             }, data=data),
@@ -623,7 +619,7 @@ class RootAdminController(a.AdminController):
         return [
             a.links("Game service", [
                 a.link("apps", "Applications", icon="mobile"),
-                a.link("servers", "Servers", icon="server")
+                a.link("hosts", "Hosts", icon="server")
             ])
         ]
 
@@ -634,25 +630,28 @@ class RootAdminController(a.AdminController):
         return ["game_admin"]
 
 
-class ServerController(a.AdminController):
+class HostController(a.AdminController):
     @coroutine
     def delete(self, *args, **kwargs):
-        server_id = self.context.get("server_id")
-        servers = self.application.servers
+        host_id = self.context.get("host_id")
+        hosts = self.application.hosts
 
-        yield servers.delete_server(server_id)
+        yield hosts.delete_host(host_id)
 
         raise a.Redirect(
-            "servers",
-            message="Server has been deleted")
+            "hosts",
+            message="Host has been deleted")
 
     @coroutine
-    def get(self, server_id):
-        servers = self.application.servers
-        server = yield servers.get_server(server_id)
+    def get(self, host_id):
+        hosts = self.application.hosts
+        host = yield hosts.get_host(host_id)
 
         result = {
-            "internal_location": server["internal_location"]
+            "name": host.name,
+            "internal_location": host.internal_location,
+            "geo_location": str(host.geo_location),
+            "host_default": "true" if host.default else "false"
         }
 
         raise a.Return(result)
@@ -660,18 +659,27 @@ class ServerController(a.AdminController):
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("servers", "Servers")
-            ], "Server '" + str(self.context.get("server_id")) + "'"),
-            a.form("Server '{0}' information".format(self.context.get("server_id")), fields={
-                "internal_location": a.field("Internal location (for debug purposes)", "text", "primary", "non-empty"),
+                a.link("hosts", "Hosts")
+            ], data["name"]),
+            a.form("Host '{0}' information".format(data["name"]), fields={
+                "name": a.field("Host name", "text", "primary", "non-empty", order=1),
+                "internal_location": a.field("Internal location", "text", "primary", "non-empty", order=2),
+                "geo_location": a.field("Geo location", "readonly", "primary", order=3),
+                "host_default": a.field("Is default?", "switch", "primary", order=4),
             }, methods={
                 "update": a.method("Update", "primary", order=1),
                 "delete": a.method("Delete", "danger", order=2)
             }, data=data),
+            a.form("Update geo location".format(data["name"]), fields={
+                "external_location": a.field("Paste external host name (or IP) to calculate geo location",
+                                       "text", "primary", "non-empty", order=1)
+            }, methods={
+                "update_geo": a.method("Update", "primary", order=1)
+            }, data=data),
             a.links("Navigate", [
-                a.link("servers", "Go back"),
-                a.link("debug_server", "Debug server", icon="bug", server_id=self.context.get("server_id")),
-                a.link("new_server", "New server", "plus")
+                a.link("hosts", "Go back"),
+                a.link("debug_host", "Debug host", icon="bug", host_id=self.context.get("host_id")),
+                a.link("new_host", "New server", "plus")
             ])
         ]
 
@@ -682,44 +690,67 @@ class ServerController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def update(self, internal_location):
-        server_id = self.context.get("server_id")
-        servers = self.application.servers
+    def update(self, name, internal_location, host_default="false"):
+        host_id = self.context.get("host_id")
+        hosts = self.application.hosts
 
-        yield servers.update_server(server_id, internal_location)
+        yield hosts.update_host(host_id, name, internal_location, host_default == "true")
 
-        result = {
-            "internal_location": internal_location
-        }
+        raise a.Redirect("host",
+                         message="Host has been updated",
+                         host_id=host_id)
 
-        raise a.Return(result)
+    @coroutine
+    def update_geo(self, external_location):
+
+        host_id = self.context.get("host_id")
+
+        try:
+            external_ip = socket.gethostbyname(external_location)
+        except socket.gaierror:
+            raise a.ActionError("Failed to lookup hostname")
+
+        geo = geolite2.lookup(external_ip)
+
+        if geo is None:
+            raise a.ActionError("Failed to lookup IP address ({0})".format(external_ip))
+
+        x, y = geo.location
+
+        hosts = self.application.hosts
+
+        try:
+            yield hosts.update_host_geo_location(host_id, x, y)
+        except HostError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect("host",
+                         message="Geo location updated",
+                         host_id=host_id)
 
 
-class ServersController(a.AdminController):
+class HostsController(a.AdminController):
     @coroutine
     def get(self):
-        servers_data = self.application.servers
-        servers = yield servers_data.list_servers()
+        hosts = self.application.hosts
+        hosts_list = yield hosts.list_hosts()
 
         result = {
-            "servers": servers
+            "hosts": hosts_list
         }
 
         raise a.Return(result)
 
     def render(self, data):
         return [
-            a.breadcrumbs([], "Servers"),
-            a.links("Servers", links=[
-                a.link("server", "#{0} {1}".format(
-                    server["server_id"],
-                    server["internal_location"]
-                ), icon="server", server_id=server["server_id"])
-                for server in data["servers"]
+            a.breadcrumbs([], "Hosts"),
+            a.links("Hosts", links=[
+                a.link("host", host.name, icon="server", host_id=host.host_id)
+                for host in data["hosts"]
                 ]),
             a.links("Navigate", [
                 a.link("index", "Go back"),
-                a.link("new_server", "New server", "plus")
+                a.link("new_host", "New host", "plus")
             ])
         ]
 

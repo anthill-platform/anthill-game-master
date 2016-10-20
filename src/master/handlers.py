@@ -4,13 +4,15 @@ import ujson
 from tornado.gen import coroutine, Return
 from tornado.web import HTTPError
 
-from common.access import scoped, internal, AccessToken
+from common.access import scoped, internal, AccessToken, remote_ip
 from common.handler import AuthenticatedHandler
 
 from data.controller import ControllerError
 from data.player import Player, RoomNotFound, PlayerError, RoomError
 from data.gameserver import GameServerNotFound
 from common.internal import InternalError
+
+from geoip import geolite2
 
 
 class InternalHandler(object):
@@ -41,8 +43,13 @@ class JoinHandler(AuthenticatedHandler):
         except ValueError:
             raise HTTPError(400, "Corrupted JSON")
 
+        ip = remote_ip(self.request)
+
+        if ip is None:
+            raise HTTPError(400, "Bad IP")
+
         player = Player(self.application, gamespace, game_name, game_version,
-                        game_server_name, account, self.token.key)
+                        game_server_name, account, self.token.key, ip)
 
         auto_create = self.get_argument("auto_create", "true") == "true"
 
@@ -101,8 +108,13 @@ class CreateHandler(AuthenticatedHandler):
         except ValueError:
             raise HTTPError(400, "Corrupted JSON")
 
+        ip = remote_ip(self.request)
+
+        if ip is None:
+            raise HTTPError(400, "Bad IP")
+
         player = Player(self.application, gamespace, game_name, game_version,
-                        game_server_name, account, self.token.key)
+                        game_server_name, account, self.token.key, ip)
 
         try:
             yield player.init()
@@ -138,8 +150,25 @@ class RoomsHandler(AuthenticatedHandler):
 
         game_server_id = gs.game_server_id
 
+        ip = remote_ip(self.request)
+
+        if ip is None:
+            raise HTTPError(400, "Bad IP")
+
+        geo = geolite2.lookup(ip)
+
         rooms_data = self.application.rooms
-        rooms = yield rooms_data.list_rooms(gamespace, game_name, game_version, game_server_id, settings)
+        hosts = self.application.hosts
+
+        if geo:
+            x, y = geo.location
+            ordered_hosts = yield hosts.list_closest_hosts(x, y)
+        else:
+            ordered_hosts = None
+
+        rooms = yield rooms_data.list_rooms(
+            gamespace, game_name, game_version,
+            game_server_id, settings, ordered_hosts)
 
         self.dumps({
             "rooms": [

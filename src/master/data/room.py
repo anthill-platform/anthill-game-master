@@ -30,6 +30,7 @@ class RoomNotFound(Exception):
 class RoomAdapter(object):
     def __init__(self, data):
         self.room_id = str(data.get("room_id"))
+        self.host_id = str(data.get("host_id"))
         self.room_settings = data.get("settings", {})
         self.players = data.get("players", 0)
         self.location = data.get("location", {})
@@ -193,7 +194,7 @@ class RoomsModel(Model):
 
     @coroutine
     def create_and_join_room(self, gamespace, game_name, game_version, gs, room_settings,
-                             account_id, access_token):
+                             account_id, access_token, host_id):
 
         max_players = gs.max_players
 
@@ -204,10 +205,10 @@ class RoomsModel(Model):
                 """
                 INSERT INTO `rooms`
                 (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
-                  `max_players`, `location`, `settings`, `state`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE')
+                  `max_players`, `location`, `settings`, `state`, `host_id`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE', %s)
                 """, gamespace, game_name, game_version, gs.game_server_id, 1, max_players,
-                "{}", ujson.dumps(room_settings)
+                "{}", ujson.dumps(room_settings), host_id
             )
 
             record_id = yield self.__insert_player__(gamespace, account_id, room_id, key, access_token, self.db)
@@ -218,7 +219,7 @@ class RoomsModel(Model):
 
     @coroutine
     def find_and_join_room(self, gamespace, game_name, game_version, game_server_id,
-                           account_id, access_token, settings):
+                           account_id, access_token, settings, hosts_order=None):
 
         """
         Find the room and join into it, if any
@@ -230,6 +231,7 @@ class RoomsModel(Model):
         :param access_token: active player's access token
         :param settings: room specific filters, defined like so:
                 {"filterA": 5, "filterB": true, "filterC": {"@func": ">", "@value": 10}}
+        :param hosts_order: a list of host id's to order result around
         :returns a pair of record_id, a key (an unique string to find the record by) for the player and room info
         """
         try:
@@ -239,6 +241,15 @@ class RoomsModel(Model):
 
         try:
             with (yield self.db.acquire(auto_commit=False)) as db:
+
+                args = [
+                    gamespace, game_name, game_version, game_server_id
+                ]
+
+                args.extend(values)
+
+                if hosts_order:
+                    args.extend(hosts_order)
 
                 # search for a room first (and lock it for a while)
                 room = yield db.get(
@@ -251,10 +262,16 @@ class RoomsModel(Model):
                       `game_server_id`=%s AND
                       `players`<`max_players` AND
                       `state`='SPAWNED'
-                      {0} {1}
-                    FOR UPDATE;
-                    """.format("AND" if body else "", body), gamespace, game_name, game_version,
-                    game_server_id, *values
+                      {0} {1} {2}
+
+                    LIMIT 1 FOR UPDATE;
+                    """.format(
+                        "AND" if body else "",
+                        body,
+                        "ORDER BY FIELD(host_id, {0})".format(
+                            ", ".join(["%s"] * len(hosts_order))
+                        )
+                        if hosts_order else ""), *args
                 )
 
                 if room is None:
@@ -314,7 +331,7 @@ class RoomsModel(Model):
             raise RoomError("Failed to join a room: " + e.args[1])
 
     @coroutine
-    def find_room(self, gamespace, game_name, game_version, game_server_id, settings):
+    def find_room(self, gamespace, game_name, game_version, game_server_id, settings, hosts_order=None):
 
         try:
             body, values = common.database.format_conditions_json('settings', settings)
@@ -322,6 +339,16 @@ class RoomsModel(Model):
             raise RoomError(e.message)
 
         try:
+
+            args = [
+                gamespace, game_name, game_version, game_server_id
+            ]
+
+            args.extend(values)
+
+            if hosts_order:
+                args.extend(hosts_order)
+
             room = yield self.db.get(
                 """
                 SELECT * FROM `rooms`
@@ -332,8 +359,14 @@ class RoomsModel(Model):
                   `game_server_id`=%s AND
                   `players`<`max_players` AND
                   `state`='SPAWNED'
-                  {0} {1}
-                """.format("AND" if body else "", body), gamespace, game_name, game_version, game_server_id, *values
+                  {0} {1} {2}
+                  LIMIT 1;
+                """.format(
+                    "AND" if body else "",
+                    body,
+                    "ORDER BY FIELD(host_id, {0})".format(
+                        ", ".join(["%s"] * len(hosts_order))
+                    )), *args
             )
         except common.database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
@@ -382,14 +415,16 @@ class RoomsModel(Model):
                     room_id, server_host, settings):
 
         try:
-            result = yield self.internal.request(
+            result = yield self.internal.post(
                 server_host, "spawn",
-                game_id=game_id,
-                game_version=game_version,
-                game_server_name=game_server_name,
-                room_id=room_id,
-                gamespace=gamespace,
-                settings=settings)
+                {
+                    "game_id": game_id,
+                    "game_version": game_version,
+                    "game_server_name": game_server_name,
+                    "room_id": room_id,
+                    "gamespace": gamespace,
+                    "settings": ujson.dumps(settings)
+                }, discover_service=False)
 
         except InternalError as e:
             raise RoomError("Failed to spawn a new game server: " + str(e.code) + " " + e.body)
@@ -456,7 +491,7 @@ class RoomsModel(Model):
             raise RoomError("Failed to leave a room: " + e.args[1])
 
     @coroutine
-    def list_rooms(self, gamespace, game_name, game_version, game_server_id, settings):
+    def list_rooms(self, gamespace, game_name, game_version, game_server_id, settings, hosts_order=None):
 
         try:
             body, values = common.database.format_conditions_json('settings', settings)
@@ -464,13 +499,27 @@ class RoomsModel(Model):
             raise RoomError(e.message)
 
         try:
+            args = [
+                gamespace, game_name, game_version, game_server_id
+            ]
+
+            args.extend(values)
+
+            if hosts_order:
+                args.extend(hosts_order)
+
             rooms = yield self.db.query(
                 """
                 SELECT * FROM `rooms`
                 WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s
                   AND `game_server_id`=%s AND `players`<`max_players`
-                  {0} {1}
-                """.format("AND" if body else "", body), gamespace, game_name, game_version, game_server_id, *values
+                  {0} {1} {2};
+                """.format(
+                    "AND" if body else "",
+                    body,
+                    "ORDER BY FIELD(host_id, {0})".format(
+                        ", ".join(["%s"] * len(hosts_order))
+                    ) if hosts_order else ""), *args
             )
         except common.database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
@@ -500,10 +549,10 @@ class RoomsModel(Model):
 
     @coroutine
     def spawn_server(self, gamespace, game_id, game_version, game_server_name,
-                     room_id, server_host, settings):
+                     room_id, host, settings):
 
         result = yield self.instantiate(gamespace, game_id, game_version, game_server_name,
-                                        room_id, server_host, settings)
+                                        room_id, host.internal_location, settings)
 
         if "location" not in result:
             raise RoomError("No location in result.")

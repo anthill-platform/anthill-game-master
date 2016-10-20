@@ -8,17 +8,20 @@ import logging
 
 from common import random_string
 from common.ratelimit import RateLimitExceeded
+from geoip import geolite2
 
 
 class Player(object):
     AUTO_REMOVE_TIME = 10
     LOCK_ACTIONS_TIME = 15
 
-    def __init__(self, app, gamespace, game_name, game_version, game_server_name, account_id, access_token):
+    def __init__(self, app, gamespace, game_name, game_version, game_server_name, account_id, access_token, ip):
         self.app = app
+        self.hosts = app.hosts
         self.rooms = app.rooms
         self.gameservers = app.gameservers
         self.gamespace = gamespace
+        self.ip = ip
 
         self.game_name = game_name
         self.game_version = game_version
@@ -54,6 +57,30 @@ class Player(object):
                 raise PlayerError(500, "No default version configuration")
 
     @coroutine
+    def get_closest_host(self):
+
+        location = self.get_location()
+
+        if location:
+            x, y = location
+            host = yield self.hosts.get_closest_host(x, y)
+        else:
+            host = yield self.hosts.get_default_host()
+
+        raise Return(host)
+
+    def get_location(self):
+        if not self.ip:
+            return None
+
+        geo = geolite2.lookup(self.ip)
+
+        if not geo:
+            return None
+
+        return geo.location
+
+    @coroutine
     def create(self, room_settings):
 
         if not isinstance(room_settings, dict):
@@ -70,9 +97,12 @@ class Player(object):
         except RateLimitExceeded:
             raise PlayerError(429, "Too many requests")
         else:
+            host = yield self.get_closest_host()
+
             self.record_id, key, self.room_id = yield self.rooms.create_and_join_room(
                 self.gamespace, self.game_name, self.game_version,
-                self.gs, room_settings, self.account_id, self.access_token)
+                self.gs, room_settings, self.account_id, self.access_token,
+                host.host_id)
 
             logging.info("Created a room: '{0}'".format(self.room_id))
 
@@ -85,7 +115,7 @@ class Player(object):
 
                 result = yield self.rooms.spawn_server(
                     self.gamespace, self.game_name, self.game_version, self.game_server_name,
-                    self.room_id, self.gs.server_host, combined_settings
+                    self.room_id, host, combined_settings
                 )
             except RoomError as e:
                 # failed to spawn a server, then leave
@@ -120,10 +150,19 @@ class Player(object):
                settings
         """
 
+        hosts_order = None
+
+        geo = self.get_location()
+
+        if geo:
+            x, y = geo
+            hosts = yield self.hosts.list_closest_hosts(x, y)
+            hosts_order = [host.host_id for host in hosts]
+
         try:
             self.record_id, key, self.room = yield self.rooms.find_and_join_room(
                 self.gamespace, self.game_name, self.game_version, self.gs.game_server_id,
-                self.account_id, self.access_token, search_settings)
+                self.account_id, self.access_token, search_settings, hosts_order)
 
         except RoomNotFound as e:
             if auto_create:

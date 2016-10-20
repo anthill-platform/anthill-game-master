@@ -32,7 +32,6 @@ class GameServerAdapter(object):
         self.name = data.get("game_server_name")
         self.game_name = data.get("game_name")
         self.game_server_id = data.get("game_server_id")
-        self.server_host = data.get("server_host", "game-ctl")
         self.schema = data.get("schema", GameServersModel.DEFAULT_SERVER_SCHEME)
         self.max_players = data.get("max_players", 8)
         self.game_settings = data.get("game_settings", {})
@@ -315,16 +314,16 @@ class GameServersModel(Model):
         raise Return(result["server_settings"])
 
     @coroutine
-    def create_game_server(self, gamespace_id, game_name, game_server_name, game_host, schema,
+    def create_game_server(self, gamespace_id, game_name, game_server_name, schema,
                            max_players, game_settings, server_settings):
         try:
             game_server_id = yield self.db.insert(
                 """
                     INSERT INTO `game_servers`
-                    (`game_name`, `gamespace_id`, `game_server_name`, `server_host`, `schema`,
+                    (`game_name`, `gamespace_id`, `game_server_name`, `schema`,
                         `max_players`, `game_settings`, `server_settings`)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
-                """, game_name, gamespace_id, game_server_name, game_host, ujson.dumps(schema),
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
+                """, game_name, gamespace_id, game_server_name, ujson.dumps(schema),
                 max_players, ujson.dumps(game_settings), ujson.dumps(server_settings))
         except common.database.DuplicateError:
             raise GameServerExists()
@@ -334,16 +333,16 @@ class GameServersModel(Model):
             raise Return(game_server_id)
 
     @coroutine
-    def update_game_server(self, gamespace_id, game_name, game_server_id, game_server_name, game_host,
+    def update_game_server(self, gamespace_id, game_name, game_server_id, game_server_name,
                            schema, max_players, game_settings, server_settings):
         try:
             yield self.db.execute(
                 """
                     UPDATE `game_servers`
-                    SET `server_host`=%s, `schema`=%s, `game_server_name`=%s,
+                    SET `schema`=%s, `game_server_name`=%s,
                         `max_players`=%s, `game_settings`=%s, `server_settings`=%s
                     WHERE `game_name`=%s AND `gamespace_id`=%s AND `game_server_id`=%s;
-                """, game_host, ujson.dumps(schema), game_server_name, max_players,
+                """, ujson.dumps(schema), game_server_name, max_players,
                 ujson.dumps(game_settings), ujson.dumps(server_settings), game_name, gamespace_id, game_server_id)
         except common.database.DatabaseError as e:
             raise GameError("Failed to change game settings:" + e.args[1])

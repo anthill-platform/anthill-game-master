@@ -15,7 +15,7 @@ import common.ratelimit
 from data.gameserver import GameServersModel
 from data.room import RoomsModel
 from data.controller import ControllersClientModel
-from data.server import ServersModel
+from data.host import HostsModel
 
 import options as _opts
 
@@ -41,7 +41,7 @@ class GameMasterServer(common.server.Server):
 
         self.gameservers = GameServersModel(self.db)
         self.rooms = RoomsModel(self.db)
-        self.servers = ServersModel(self.db)
+        self.hosts = HostsModel(self.db)
 
         self.ctl_client = ControllersClientModel(self.rooms)
 
@@ -50,7 +50,7 @@ class GameMasterServer(common.server.Server):
         })
 
     def get_models(self):
-        return [self.servers, self.rooms, self.gameservers]
+        return [self.hosts, self.rooms, self.gameservers]
 
     def get_admin(self):
         return {
@@ -63,10 +63,10 @@ class GameMasterServer(common.server.Server):
             "new_game_server": admin.NewGameServerController,
             "game_server_version": admin.GameServerVersionController,
 
-            "servers": admin.ServersController,
-            "server": admin.ServerController,
-            "debug_server": admin.DebugServerController,
-            "new_server": admin.NewServerController
+            "hosts": admin.HostsController,
+            "host": admin.HostController,
+            "debug_host": admin.DebugHostController,
+            "new_host": admin.NewHostController
         }
 
     def get_admin_stream(self):
