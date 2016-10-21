@@ -5,6 +5,12 @@ import logging
 from common.internal import Internal, InternalError
 
 
+class NotifyError(Exception):
+    def __init__(self, code, message):
+        self.code = code
+        self.message = message
+
+
 class Room(object):
     def __init__(self, rooms, gamespace, room_id, settings):
         self.rooms = rooms
@@ -38,6 +44,8 @@ class Room(object):
 
         except InternalError as e:
             logging.error("Failed to notify an action: " + str(e.code) + ": " + e.body)
+
+            raise NotifyError(e.code, e.message)
         else:
             # if there's a method with such action name, call it
             if (not method.startswith("_")) and hasattr(self, method):

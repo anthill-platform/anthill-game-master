@@ -9,12 +9,14 @@ import logging
 import signal
 import msg
 import datetime
+
 import common.events
 import common.jsonrpc
 import common.discover
 
 from common.discover import DiscoveryError
 from common.internal import Internal, InternalError
+from room import NotifyError
 
 import ujson
 
@@ -381,7 +383,10 @@ class GameServer(object):
             # then catch it
             response = yield self.handlers[method](*args, **kwargs)
         else:
-            response = yield self.room.notify(method, *args, **kwargs)
+            try:
+                response = yield self.room.notify(method, *args, **kwargs)
+            except NotifyError as e:
+                raise common.jsonrpc.JsonRPCError(e.code, e.message)
 
             # if there's a method with such action name, call it
             if (not method.startswith("_")) and hasattr(self, method):
@@ -393,5 +398,7 @@ class GameServer(object):
     def listen(self, sock_path):
         self.msg = msg.ProcessMessages(path=sock_path)
         self.msg.set_receive(self.command)
-        yield self.msg.server()
-
+        try:
+            yield self.msg.server()
+        except common.jsonrpc.JsonRPCError as e:
+            raise SpawnError(e.message)
