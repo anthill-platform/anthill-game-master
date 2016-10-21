@@ -162,7 +162,8 @@ class RoomsHandler(AuthenticatedHandler):
 
         if geo:
             x, y = geo.location
-            ordered_hosts = yield hosts.list_closest_hosts(x, y)
+            closest_hosts = yield hosts.list_closest_hosts(x, y)
+            ordered_hosts = [host.host_id for host in closest_hosts]
         else:
             ordered_hosts = None
 
