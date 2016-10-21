@@ -82,6 +82,20 @@ class RoomsModel(Model):
         self.internal = Internal()
 
     @coroutine
+    def get_players_count(self):
+        try:
+            count = yield self.db.get(
+                """
+                SELECT COUNT(*) AS `count` FROM `players`
+                WHERE `state`='JOINED'
+                """
+            )
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to get players count: " + e.args[1])
+
+        raise Return(count["count"])
+
+    @coroutine
     def __insert_player__(self, gamespace, account_id, room_id, key, access_token, db):
         record_id = yield db.insert(
             """

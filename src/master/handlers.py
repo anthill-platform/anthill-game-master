@@ -177,3 +177,17 @@ class RoomsHandler(AuthenticatedHandler):
                 for room in rooms
                 ]
         })
+
+
+class StatusHandler(AuthenticatedHandler):
+    @coroutine
+    def get(self):
+
+        try:
+            players_count = yield self.application.rooms.get_players_count()
+        except RoomError as e:
+            raise HTTPError(500, e.message)
+
+        self.dumps({
+            "players": players_count
+        })
