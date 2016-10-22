@@ -597,7 +597,7 @@ class NewHostController(a.AdminController):
         return [
             a.form("New host", fields={
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "internal_location": a.field("Internal location", "text", "primary", "non-empty", order=2),
+                "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty", order=2),
                 "host_default": a.field("Is Default?", "switch", "primary", "non-empty", order=3),
             }, methods={
                 "create": a.method("Create", "primary")
@@ -663,7 +663,7 @@ class HostController(a.AdminController):
             ], data["name"]),
             a.form("Host '{0}' information".format(data["name"]), fields={
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "internal_location": a.field("Internal location", "text", "primary", "non-empty", order=2),
+                "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty", order=2),
                 "geo_location": a.field("Geo location", "readonly", "primary", order=3),
                 "host_default": a.field("Is default?", "switch", "primary", order=4),
             }, methods={
