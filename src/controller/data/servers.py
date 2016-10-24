@@ -80,7 +80,9 @@ class GameServersData(object):
         instance = yield self.instantiate(name, game_name, game_version, game_server_name, room)
 
         app_path = os.path.join(self.binaries_path, game_name, game_version)
-        sock_path = os.path.join(self.sock_path, name)
+        
+        sock_name = str(os.getpid()) + "_" + name
+        sock_path = os.path.join(self.sock_path, sock_name)
 
         try:
             settings = yield instance.spawn(app_path, binary, sock_path, arguments, env, room)
