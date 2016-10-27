@@ -85,7 +85,7 @@
             s.controls.html('');
 
             $('<a href="#" class="btn btn-default">' +
-                '<span class="glyphicon glyphicon-stats" aria-hidden="true"></span> ' +
+                '<i class="fa fa-list-alt" aria-hidden="true"></i> ' +
                 'See logs</a>').appendTo(s.controls).click(function()
             {
                 if (s.logs == null)
@@ -107,36 +107,66 @@
                 {
                     s.logs.toggle();
                 }
+
+                return false;
             });
 
             var data = s.server;
+
+            $('<a href="#" class="btn btn-default">' +
+                '<i class="fa fa-terminal" aria-hidden="true"></i> Send A Command</a>').
+                appendTo(s.controls).click(function()
+            {
+                bootbox.prompt("Enter the command. It will be sent to game server STDIN", function(result)
+                {
+                    if (result)
+                    {
+                        zis.ws.request("send_stdin", {
+                            "server": name,
+                            "data": result
+                        }).done(function(payload)
+                        {
+                            notify_success("Command was sent!")
+                        }).fail(function(code, message, data)
+                        {
+                            notify_error("Error " + code + ": " + message)
+                        });
+                    }
+
+                });
+
+                return false;
+            });
 
             $('<a href="/service/game/app_version?context=' + encodeURIComponent(JSON.stringify({
                     "app_id": data.game,
                     "version_id": data.version
                 })) + '" target="_blank" class="btn btn-default">' +
-                '<span class="glyphicon glyphicon-link" aria-hidden="true"></span> ' +
-                'Edit server</a>').appendTo(s.controls);
+                '<i class="fa fa-link" aria-hidden="true"></i> Edit server</a>').appendTo(s.controls);
 
             $('<a href="#" class="btn btn-warning">' +
-                '<span class="glyphicon glyphicon-remove" aria-hidden="true"></span> ' +
-                'Terminate</a>').appendTo(s.controls).click(function()
+                '<i class="fa fa-remove" aria-hidden="true"></i> Terminate</a>').appendTo(s.controls).
+            click(function()
             {
                 zis.ws.rpc("kill", {
                     "server": name,
                     "hard": false
                 });
+
+                return false;
             });
 
 
             $('<a href="#" class="btn btn-danger">' +
-                '<span class="glyphicon glyphicon-remove-sign" aria-hidden="true"></span> ' +
+                '<i class="fa fa-trash" aria-hidden="true"></i> ' +
                 'Kill</a>').appendTo(s.controls).click(function()
             {
                 zis.ws.rpc("kill", {
                     "server": name,
                     "hard": true
                 });
+
+                return false;
             });
 
             s.tab_header.find('a').tab('show');

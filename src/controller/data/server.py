@@ -315,6 +315,10 @@ class GameServer(object):
             raise SpawnError("Failed to spawn a game server: timeout")
 
     @coroutine
+    def send_stdin(self, data):
+        self.pipe.write(data.encode('ascii', 'ignore') + "\n")
+
+    @coroutine
     def terminate(self, kill=False):
         self.__notify__("Terminating... (kill={0})".format(kill))
 

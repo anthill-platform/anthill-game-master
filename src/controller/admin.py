@@ -27,6 +27,17 @@ class DebugController(a.StreamAdminController):
         yield self.rpc(self, "log", name=name, data=data)
 
     @coroutine
+    def send_stdin(self, server, data):
+        server = self.gs.get_server(server)
+
+        if not server:
+            return
+
+        yield server.send_stdin(data)
+
+        raise Return({})
+
+    @coroutine
     def new_server(self, server):
         yield self.rpc(self, "new_server", **DebugController.serialize_server(server))
 
