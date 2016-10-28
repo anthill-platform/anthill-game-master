@@ -54,13 +54,11 @@ class Process(object):
        other than PIPE will make the write() method raise an exception.
     """
 
-    def __del__(self, __killer=os.kill, __sigkill=signal.SIGKILL):
-        if self.__exitstatus is None:
-            __killer(self.pid(), __sigkill)
-
     def __feeder(self, pending, drain):
-        """Feed data from the list pending to the file drain.
-	"""
+        """
+        Feed data from the list pending to the file drain.
+        """
+
         while True:
             self.__inputsem.acquire()
             self.__lock.acquire()
@@ -113,8 +111,10 @@ class Process(object):
             self.__stderr_thread.start()
 
     def __reader(self, collector, source):
-        """Read data from source until EOF, adding it to collector.
-	"""
+        """
+        Read data from source until EOF, adding it to collector.
+        """
+
         while True:
             data = os.read(source.fileno(), 65536)
             self.__lock.acquire()
@@ -133,19 +133,21 @@ class Process(object):
         return output, error
 
     def closeinput(self):
-        """Close the standard input of a process, so it receives EOF.
-	"""
+        """
+        Close the standard input of a process, so it receives EOF.
+        """
         self.__lock.acquire()
         self.__quit = True
         self.__inputsem.release()
         self.__lock.release()
 
-
     def kill(self, signal):
-        """Send a signal to the process.
-	   Raises OSError, with errno set to ECHILD, if the process is no
-	   longer running.
-	"""
+        """
+        Send a signal to the process.
+        Raises OSError, with errno set to ECHILD, if the process is no
+        longer running.
+        """
+
         if self.__exitstatus is not None:
             # Throwing ECHILD is perhaps not the most kosher thing to do...
             # ESRCH might be considered more proper.
@@ -153,16 +155,19 @@ class Process(object):
         os.killpg(os.getpgid(self.pid()), signal)
 
     def pid(self):
-        """Return the process id of the process.
-	   Note that if the process has died (and successfully been waited
-	   for), that process id may have been re-used by the operating
-	   system.
-	"""
+        """
+        Return the process id of the process.
+        Note that if the process has died (and successfully been waited
+        for), that process id may have been re-used by the operating
+        system.
+        """
         return self.__process.pid
 
     def read(self):
-        """Read data written by the process to its standard output.
-	"""
+        """
+        Read data written by the process to its standard output.
+        """
+
         self.__lock.acquire()
         outdata = "".join(self.__collected_outdata)
         del self.__collected_outdata[:]
@@ -171,11 +176,12 @@ class Process(object):
 
     def readboth(self):
         """Read data written by the process to its standard output and error.
-	   Return value is a two-tuple ( stdout-data, stderr-data ).
+        Return value is a two-tuple ( stdout-data, stderr-data ).
 
-	   WARNING!  The name of this method is ugly, and may change in
-	   future versions!
-	"""
+        WARNING!  The name of this method is ugly, and may change in
+        future versions!
+        """
+
         self.__lock.acquire()
         outdata = "".join(self.__collected_outdata)
         del self.__collected_outdata[:]
@@ -185,8 +191,10 @@ class Process(object):
         return outdata, errdata
 
     def readerr(self):
-        """Read data written by the process to its standard error.
-	"""
+        """
+        Read data written by the process to its standard error.
+        """
+
         self.__lock.acquire()
         errdata = "".join(self.__collected_errdata)
         del self.__collected_errdata[:]
@@ -195,18 +203,19 @@ class Process(object):
 
     def terminate(self, graceperiod=1):
         """Terminate the process, with escalating force as needed.
-	   First try gently, but increase the force if it doesn't respond
-	   to persuassion.  The levels tried are, in order:
-	    - close the standard input of the process, so it gets an EOF.
-	    - send SIGTERM to the process.
-	    - send SIGKILL to the process.
-	   terminate() waits up to GRACEPERIOD seconds (default 1) before
-	   escalating the level of force.  As there are three levels, a total
-	   of (3-1)*GRACEPERIOD is allowed before the process is SIGKILL:ed.
-	   GRACEPERIOD must be an integer, and must be at least 1.
-	      If the process was started with stdin not set to PIPE, the
-	   first level (closing stdin) is skipped.
-	"""
+        First try gently, but increase the force if it doesn't respond
+        to persuassion.  The levels tried are, in order:
+        - close the standard input of the process, so it gets an EOF.
+        - send SIGTERM to the process.
+        - send SIGKILL to the process.
+        terminate() waits up to GRACEPERIOD seconds (default 1) before
+        escalating the level of force.  As there are three levels, a total
+        of (3-1)*GRACEPERIOD is allowed before the process is SIGKILL:ed.
+        GRACEPERIOD must be an integer, and must be at least 1.
+        If the process was started with stdin not set to PIPE, the
+        first level (closing stdin) is skipped.
+        """
+
         if self.__process.stdin:
             # This is rather meaningless when stdin != PIPE.
             self.closeinput()
@@ -225,17 +234,19 @@ class Process(object):
         return self.wait()
 
     def wait(self, flags=0):
-        """Return the process' termination status.
+        """
+        Return the process' termination status.
 
-	   If bitmask parameter 'flags' contains os.WNOHANG, wait() will
-	   return None if the process hasn't terminated.  Otherwise it
-	   will wait until the process dies.
+        If bitmask parameter 'flags' contains os.WNOHANG, wait() will
+        return None if the process hasn't terminated.  Otherwise it
+        will wait until the process dies.
 
-	   It is permitted to call wait() several times, even after it
-	   has succeeded; the Process instance will remember the exit
-	   status from the first successful call, and return that on
-	   subsequent calls.
-	"""
+        It is permitted to call wait() several times, even after it
+        has succeeded; the Process instance will remember the exit
+        status from the first successful call, and return that on
+        subsequent calls.
+        """
+
         if self.__exitstatus is not None:
             return self.__exitstatus
         pid, exitstatus = os.waitpid(self.pid(), flags)
@@ -261,8 +272,9 @@ class Process(object):
         return exitstatus
 
     def write(self, data):
-        """Send data to a process's standard input.
-	"""
+        """
+        Send data to a process's standard input.
+        """
         if self.__process.stdin is None:
             raise ValueError("Writing to process with stdin not a pipe")
         self.__lock.acquire()
@@ -270,13 +282,16 @@ class Process(object):
         self.__inputsem.release()
         self.__lock.release()
 
+
 class ProcessManager(object):
-    """Manager for asynchronous processes.
-       This class is intended for use in a server that wants to expose the
-       asyncproc.Process API to clients.  Within a single process, it is
-       usually better to just keep track of the Process objects directly
-       instead of hiding them behind this.  It probably shouldn't have been
-       made part of the asyncproc module in the first place.
+    """
+    Manager for asynchronous processes.
+
+    This class is intended for use in a server that wants to expose the
+    asyncproc.Process API to clients.  Within a single process, it is
+    usually better to just keep track of the Process objects directly
+    instead of hiding them behind this.  It probably shouldn't have been
+    made part of the asyncproc module in the first place.
     """
 
     def __init__(self):
@@ -299,20 +314,22 @@ class ProcessManager(object):
         return self.__procs[procid].readerr()
 
     def reap(self, procid):
-        """Remove a process.
-	   If the process is still running, it is killed with no pardon.
-	   The process will become unaccessible, and its identifier may
-	   be reused immediately.
-	"""
+        """
+        Remove a process.
+        If the process is still running, it is killed with no pardon.
+        The process will become unaccessible, and its identifier may
+        be reused immediately.
+        """
         if self.wait(procid, os.WNOHANG) is None:
             self.kill(procid, signal.SIGKILL)
         self.wait(procid)
         del self.__procs[procid]
 
     def reapall(self):
-        """Remove all processes.
-	   Running processes are killed without pardon.
-	"""
+        """
+        Remove all processes.
+        Running processes are killed without pardon.
+        """
         # Since reap() modifies __procs, we have to iterate over a copy
         # of the keys in it.  Thus, do not remove the .keys() call.
         for procid in self.__procs.keys():
@@ -325,32 +342,38 @@ def _P1():
 
 def _P2():
     return Process(["tcplisten", "-irv", "6923"])
-    def start(self, args, executable=None, shell=False, cwd=None, env=None):
-        """Start a program in the background, collecting its output.
-	   Returns an integer identifying the process.	(Note that this
-	   integer is *not* the OS process id of the actuall running
-	   process.)
-	"""
-        proc = Process(args=args, executable=executable, shell=shell,
-                       cwd=cwd, env=env)
-        self.__last_id += 1
-        self.__procs[self.__last_id] = proc
-        return self.__last_id
 
-    def terminate(self, procid, graceperiod=1):
-        return self.__procs[procid].terminate(graceperiod)
 
-    def wait(self, procid, flags=0):
-        """
-	   Unlike the os.wait() function, the process will be available
-	   even after ProcessManager.wait() has returned successfully,
-	   in order for the process' output to be retrieved.  Use the
-	   reap() method for removing dead processes.
-	"""
-        return self.__procs[procid].wait(flags)
+def start(self, args, executable=None, shell=False, cwd=None, env=None):
+    """Start a program in the background, collecting its output.
+        Returns an integer identifying the process.	(Note that this
+        integer is *not* the OS process id of the actuall running
+        process.)
+    """
+    proc = Process(args=args, executable=executable, shell=shell,
+               cwd=cwd, env=env)
+    self.__last_id += 1
+    self.__procs[self.__last_id] = proc
+    return self.__last_id
 
-    def write(self, procid, data):
-        return self.__procs[procid].write(data)
+
+def terminate(self, procid, graceperiod=1):
+    return self.__procs[procid].terminate(graceperiod)
+
+
+def wait(self, procid, flags=0):
+    """
+   Unlike the os.wait() function, the process will be available
+   even after ProcessManager.wait() has returned successfully,
+   in order for the process' output to be retrieved.  Use the
+   reap() method for removing dead processes.
+"""
+    return self.__procs[procid].wait(flags)
+
+
+def write(self, procid, data):
+    return self.__procs[procid].write(data)
+
 
 class Timeout(Exception):
     """Exception raised by with_timeout() when the operation takes too long.
@@ -359,32 +382,35 @@ class Timeout(Exception):
 
 
 def with_timeout(timeout, func, *args, **kwargs):
-    """Call a function, allowing it only to take a certain amount of time.
-       Parameters:
-	- timeout	The time, in seconds, the function is allowed to spend.
-			This must be an integer, due to limitations in the
-			SIGALRM handling.
-	- func		The function to call.
-	- *args		Non-keyword arguments to pass to func.
-	- **kwargs	Keyword arguments to pass to func.
+    """
+    Call a function, allowing it only to take a certain amount of time.
 
-       Upon successful completion, with_timeout() returns the return value
-       from func.  If a timeout occurs, the Timeout exception will be raised.
+    Parameters:
+    - timeout	The time, in seconds, the function is allowed to spend.
+    This must be an integer, due to limitations in the
+    SIGALRM handling.
+    - func		The function to call.
+    - *args		Non-keyword arguments to pass to func.
+    - **kwargs	Keyword arguments to pass to func.
 
-       If an alarm is pending when with_timeout() is called, with_timeout()
-       tries to restore that alarm as well as possible, and call the SIGALRM
-       signal handler if it would have expired during the execution of func.
-       This may cause that signal handler to be executed later than it would
-       normally do.  In particular, calling with_timeout() from within a
-       with_timeout() call with a shorter timeout, won't interrupt the inner
-       call.  I.e.,
-	    with_timeout(5, with_timeout, 60, time.sleep, 120)
-       won't interrupt the time.sleep() call until after 60 seconds.
+    Upon successful completion, with_timeout() returns the return value
+    from func.  If a timeout occurs, the Timeout exception will be raised.
+
+    If an alarm is pending when with_timeout() is called, with_timeout()
+    tries to restore that alarm as well as possible, and call the SIGALRM
+    signal handler if it would have expired during the execution of func.
+    This may cause that signal handler to be executed later than it would
+    normally do.  In particular, calling with_timeout() from within a
+    with_timeout() call with a shorter timeout, won't interrupt the inner
+    call.  I.e.,
+    with_timeout(5, with_timeout, 60, time.sleep, 120)
+    won't interrupt the time.sleep() call until after 60 seconds.
     """
 
     class SigAlarm(Exception):
-        """Internal exception used only within with_timeout().
-	"""
+        """
+        Internal exception used only within with_timeout().
+        """
         pass
 
     def alarm_handler(signum, frame):
@@ -412,5 +438,3 @@ def with_timeout(timeout, func, *args, **kwargs):
                 signal.alarm(remaining)
 
     return retval
-
-

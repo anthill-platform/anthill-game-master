@@ -112,8 +112,6 @@ class GameServersData(object):
         def remove_server():
             self.servers.pop(instance.name)
 
-        yield instance.release()
-
         tornado.ioloop.IOLoop.current().add_timeout(datetime.timedelta(minutes=10), remove_server)
 
     @coroutine

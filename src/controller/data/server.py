@@ -326,8 +326,12 @@ class GameServer(object):
             self.pipe.kill(signal.SIGKILL if kill else signal.SIGTERM)
         except OSError as e:
             self.__notify__("Server terminate error: " + e.args[1])
-            if not kill:
+            if kill:
+                yield self.__stopped__()
+            else:
                 yield self.terminate(kill=True)
+
+        self.log.flush()
 
     def get_log(self):
         return self.log.get_log()
@@ -354,9 +358,15 @@ class GameServer(object):
         self.set_status(GameServer.STATUS_STOPPED)
 
         # notify the master server that this server is died
-        yield self.command(self, "stopped")
+        try:
+            yield self.command(self, "stopped")
+        except common.jsonrpc.JsonRPCError:
+            logging.exception("Failed to notify the server is stopped!")
 
         yield self.gs.stopped(self)
+
+        self.log.flush()
+
         yield self.release()
 
     @coroutine
