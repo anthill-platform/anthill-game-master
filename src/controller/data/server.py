@@ -355,6 +355,8 @@ class GameServer(object):
     @coroutine
     def __stopped__(self):
         self.__notify__("Stopped.")
+        self.log.flush()
+
         self.set_status(GameServer.STATUS_STOPPED)
 
         # notify the master server that this server is died
@@ -371,6 +373,8 @@ class GameServer(object):
 
     @coroutine
     def release(self):
+        yield self.msg.relese()
+
         # put back the ports acquired at spawn
         for port in self.ports:
             self.gs.pool.put(port)
