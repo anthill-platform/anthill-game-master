@@ -373,7 +373,7 @@ class GameServer(object):
 
     @coroutine
     def release(self):
-        yield self.msg.relese()
+        yield self.msg.release()
 
         # put back the ports acquired at spawn
         for port in self.ports:
