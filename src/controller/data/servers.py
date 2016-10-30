@@ -1,6 +1,7 @@
 
 from tornado.gen import coroutine, Return
 import tornado.ioloop
+from common.model import Model
 
 import logging
 import os
@@ -10,7 +11,7 @@ import random
 import datetime
 
 
-class GameServersData(object):
+class GameServersData(Model):
     def __init__(self, app,
                  sock_path="/tmp",
                  binaries_path="/opt/gs",
@@ -105,7 +106,7 @@ class GameServersData(object):
         raise Return(result)
 
     @coroutine
-    def stopped(self, instance):
+    def server_stopped(self, instance):
         self.sub.unsubscribe(instance.pub, ["server_updated"])
         self.pub.notify("server_removed", server=instance)
 
@@ -116,8 +117,11 @@ class GameServersData(object):
 
     @coroutine
     def terminate_all(self, kill=False):
-        for s in self.servers:
-            yield s.terminate(kill=kill)
+        yield [s.terminate(kill=kill) for s in self.servers]
+
+    @coroutine
+    def stopped(self):
+        yield self.terminate_all(kill=True)
 
 
 class PoolError(Exception):

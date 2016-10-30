@@ -1,5 +1,6 @@
 
 from tornado.gen import coroutine, Return, sleep, with_timeout, Task, TimeoutError
+from tornado.ioloop import PeriodicCallback
 
 import tornado.ioloop
 
@@ -82,6 +83,7 @@ class GameServer(object):
 
     SPAWN_TIMEOUT = 30
     CHECK_PERIOD = 60
+    READ_PERIOD_MS = 200
 
     def __init__(self, gs, game_name, game_version, game_server_name, name, room):
         self.gs = gs
@@ -112,7 +114,10 @@ class GameServer(object):
         for i in xrange(0, ports_num):
             self.ports.append(gs.pool.acquire())
 
-        self.check_period = game_settings.get("check_period", GameServer.CHECK_PERIOD)
+        check_period = game_settings.get("check_period", GameServer.CHECK_PERIOD) * 1000
+
+        self.read_cb = PeriodicCallback(self.__recv__, GameServer.READ_PERIOD_MS)
+        self.check_cb = PeriodicCallback(self.__check__, check_period)
 
         self.str_data = LineStream()
         self.err_data = LineStream()
@@ -129,26 +134,29 @@ class GameServer(object):
         self.log.flush()
         self.__notify_updated__()
 
+    def __check__(self):
+        if not self.is_running():
+            self.check_cb.stop()
+            return
+
+        tornado.ioloop.IOLoop.current().spawn_callback(self.__check_status__)
+
     @coroutine
     def __check_status__(self):
-        while self.is_running():
-            yield sleep(self.check_period)
-            # is_running could change while we've been sleeping
-            if self.is_running():
-                try:
-                    response = yield self.msg.request(self, "status")
-                except common.jsonrpc.JsonRPCTimeout:
-                    self.__notify__("Timeout to check status")
-                    yield self.terminate(False)
-                else:
-                    if not isinstance(response, dict):
-                        status = "not_a_dict"
-                    else:
-                        status = response.get("status", "bad")
-                    self.__notify__("Status: " + status)
-                    if status != "ok":
-                        self.__notify__("Bad status")
-                        yield self.terminate(False)
+        try:
+            response = yield self.msg.request(self, "status")
+        except common.jsonrpc.JsonRPCTimeout:
+            self.__notify__("Timeout to check status")
+            yield self.terminate(False)
+        else:
+            if not isinstance(response, dict):
+                status = "not_a_dict"
+            else:
+                status = response.get("status", "bad")
+            self.__notify__("Status: " + status)
+            if status != "ok":
+                self.__notify__("Bad status")
+                yield self.terminate(False)
 
     @coroutine
     def update_settings(self, result, settings, *args, **kwargs):
@@ -161,8 +169,7 @@ class GameServer(object):
 
         self.__notify__("Inited.")
         self.set_status(GameServer.STATUS_RUNNING)
-
-        tornado.ioloop.IOLoop.current().spawn_callback(self.__check_status__)
+        self.check_cb.start()
 
         raise Return({
             "status": "OK"
@@ -269,7 +276,7 @@ class GameServer(object):
             raise SpawnError(reason)
         else:
             self.set_status(GameServer.STATUS_LOADING)
-            self.ioloop.add_callback(self.__recv__)
+            self.read_cb.start()
 
         self.__notify__("Server '{0}' spawned, waiting for init command.".format(self.name))
 
@@ -340,24 +347,31 @@ class GameServer(object):
         return text in self.log.get_log()
 
     def __recv__(self):
-        if self.status in [GameServer.STATUS_STOPPED]:
+        if self.status == GameServer.STATUS_STOPPED:
             return
 
         self.err_data.add(self.pipe.readerr(), self.__notify__)
         self.str_data.add(self.pipe.read(), self.__notify__)
 
         poll = self.pipe.wait(os.WNOHANG)
-        if poll is None:
-            self.ioloop.add_callback(self.__recv__)
-        else:
-            self.ioloop.spawn_callback(self.__stopped__)
+        if poll:
+            self.__recv_stop__()
+
+    def __recv_stop__(self):
+        self.read_cb.stop()
+        self.check_cb.stop()
+
+        self.ioloop.spawn_callback(self.__stopped__)
 
     @coroutine
     def __stopped__(self):
-        self.__notify__("Stopped.")
-        self.log.flush()
+        if self.status == GameServer.STATUS_STOPPED:
+            return
 
         self.set_status(GameServer.STATUS_STOPPED)
+
+        self.__notify__("Stopped.")
+        self.log.flush()
 
         # notify the master server that this server is died
         try:
@@ -365,7 +379,7 @@ class GameServer(object):
         except common.jsonrpc.JsonRPCError:
             logging.exception("Failed to notify the server is stopped!")
 
-        yield self.gs.stopped(self)
+        yield self.gs.server_stopped(self)
 
         self.log.flush()
 
@@ -378,6 +392,7 @@ class GameServer(object):
         # put back the ports acquired at spawn
         for port in self.ports:
             self.gs.pool.put(port)
+
         self.ports = []
 
     def __flush_log__(self, data):
