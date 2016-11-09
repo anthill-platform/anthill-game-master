@@ -64,10 +64,7 @@ class ApplicationController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
 
@@ -133,10 +130,7 @@ class GameServerController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
     @coroutine
@@ -263,10 +257,7 @@ class NewGameServerController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
     @coroutine
@@ -404,10 +395,7 @@ class GameServerVersionController(a.AdminController):
 
         return config
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
     @coroutine
@@ -490,11 +478,9 @@ class ApplicationVersionController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
+    def access_scopes(self):
         return ["game_admin"]
 
-    def scopes_write(self):
-        return ["game_admin"]
 
 
 class ApplicationsController(a.AdminController):
@@ -522,10 +508,7 @@ class ApplicationsController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
 
@@ -575,10 +558,7 @@ class DebugHostController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
 
@@ -607,10 +587,7 @@ class NewHostController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
 
@@ -623,10 +600,7 @@ class RootAdminController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
 
@@ -683,10 +657,7 @@ class HostController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["game_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["game_admin"]
 
     @coroutine
@@ -754,8 +725,5 @@ class HostsController(a.AdminController):
             ])
         ]
 
-    def scopes_read(self):
-        return ["discovery_admin"]
-
-    def scopes_write(self):
+    def access_scopes(self):
         return ["discovery_admin"]
