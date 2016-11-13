@@ -47,13 +47,13 @@ class ApplicationController(a.AdminController):
             a.breadcrumbs([
                 a.link("apps", "Applications")
             ], data["app_name"]),
-            a.links("Game Servers", links=[
-                a.link("game_server", gs.name, icon="rocket", game_server_id=gs.game_server_id, game_name=game_name)
-                for gs in data["game_servers"]
-            ]),
             a.links("Application '{0}' versions".format(data["app_name"]), links=[
                 a.link("app_version", v_name, icon="tags", app_id=game_name,
                        version_id=v_name) for v_name, v_id in data["versions"].iteritems()
+            ]),
+            a.links("Game Servers", links=[
+                a.link("game_server", gs.name, icon="rocket", game_server_id=gs.game_server_id, game_name=game_name)
+                for gs in data["game_servers"]
             ]),
             a.links("Navigate", [
                 a.link("apps", "Go back"),
@@ -375,7 +375,7 @@ class GameServerVersionController(a.AdminController):
                 a.link("app_version", self.context.get("game_version"),
                        app_id=self.context.get("game_name"), version_id=self.context.get("game_version")),
 
-            ], "Game Server Configuration '{0}' for version '{1}'".format(
+            ], "Game Server {0} version {1}".format(
                 data["game_server_name"], self.context.get("game_version"))),
 
             a.form(title="Server configuration for version {0}".format(
@@ -465,6 +465,12 @@ class ApplicationVersionController(a.AdminController):
                 a.link("app", data["app_name"], record_id=self.context.get("app_id"))
             ], self.context.get("version_id")),
 
+            a.links("Deploy", [
+                a.link("deploy", "Deploy This Game Server", icon="upload",
+                       game_name=self.context.get("app_id"),
+                       game_version=self.context.get("version_id"))
+            ]),
+
             a.links("Game Servers configurations for game version {0}".format(self.context.get("version_id")), links=[
                 a.link("game_server_version", gs.name, icon="rocket",
                        game_name=self.context.get("app_id"),
@@ -481,6 +487,76 @@ class ApplicationVersionController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
+
+class DeployApplicationController(a.AdminController):
+    @coroutine
+    def get(self, game_name, game_version):
+
+        env_service = self.application.env_service
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        result = {
+            "app_name": app["title"]
+        }
+
+        raise a.Return(result)
+
+    def render(self, data):
+        return [
+            a.breadcrumbs([
+                a.link("apps", "Applications"),
+                a.link("app", data["app_name"], record_id=self.context.get("game_name")),
+                a.link("app_version", self.context.get("game_version"),
+                       app_id=self.context.get("game_name"), version_id=self.context.get("game_version"))
+            ], "Deploy"),
+
+            a.form("Deploy <b>{0}</b> / version <b>{1}</b>".format(
+                data["app_name"], self.context.get("game_version")
+            ), fields={
+                "binary": a.field("Archived Game Server (*.zip)", "file", "primary")
+            }, methods={
+                "deploy": a.method("Deploy", style="primary")
+            }, data=data, icon="upload"),
+
+            a.links("Navigate", [
+                a.link("app_version", "Go back",
+                       app_id=self.context.get("game_name"),
+                       version_id=self.context.get("game_version"))
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_deploy_admin"]
+
+    @coroutine
+    def deploy(self, binary):
+
+        game_name = self.context.get("game_name")
+        game_version = self.context.get("game_version")
+
+        if not binary:
+            raise a.ActionError("No binary file passed.")
+
+        file = binary[0]
+
+        if not file.name.endswith(".zip"):
+            raise a.ActionError("The file passed is not a zip file.")
+
+        try:
+            pass
+
+        except GameError as e:
+            raise a.ActionError("Failed to deploy game server: " + e.message)
+
+        raise a.Redirect(
+            "deploy",
+            message="Game server has been deployed",
+            game_name=game_name,
+            game_version=game_version)
 
 
 class ApplicationsController(a.AdminController):

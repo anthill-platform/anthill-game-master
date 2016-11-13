@@ -101,7 +101,7 @@ class Player(object):
             self.record_id, key, self.room_id = yield self.rooms.create_and_join_room(
                 self.gamespace, self.game_name, self.game_version,
                 self.gs, room_settings, self.account_id, self.access_token,
-                host.host_id)
+                host.host_id, False)
 
             logging.info("Created a room: '{0}'".format(self.room_id))
 
@@ -124,6 +124,8 @@ class Player(object):
                 yield limit.rollback()
                 raise e
 
+            self.rooms.trigger_remove_temp_reservation(self.gamespace, self.room_id, self.account_id)
+
             updated_room_settings = result.get("settings")
 
             if updated_room_settings:
@@ -140,28 +142,41 @@ class Player(object):
             raise Return(result)
 
     @coroutine
-    def join(self, search_settings, auto_create=False, create_room_settings=None):
+    def join(self, search_settings,
+             auto_create=False,
+             create_room_settings=None,
+             lock_my_region=False):
         """
         Joins a player to the first available room. Waits until the room is
         :param search_settings: filters to search the rooms
         :param auto_create: if no such room, create one
         :param create_room_settings: in case room auto creation is triggered, will be use to fill the new room's
                settings
+        :param lock_my_region: should be search applied to the player's region only
         """
 
         hosts_order = None
 
         geo = self.get_location()
+        my_region_only = None
 
         if geo:
             x, y = geo
-            hosts = yield self.hosts.list_closest_hosts(x, y)
-            hosts_order = [host.host_id for host in hosts]
+
+            if lock_my_region:
+                my_region_only = yield self.hosts.get_closest_host(x, y)
+
+            if not my_region_only:
+                hosts = yield self.hosts.list_closest_hosts(x, y)
+                hosts_order = [host.host_id for host in hosts]
 
         try:
             self.record_id, key, self.room = yield self.rooms.find_and_join_room(
                 self.gamespace, self.game_name, self.game_version, self.gs.game_server_id,
-                self.account_id, self.access_token, search_settings, hosts_order)
+                self.account_id, self.access_token, search_settings,
+
+                hosts_order=hosts_order,
+                my_region_only=my_region_only)
 
         except RoomNotFound as e:
             if auto_create:

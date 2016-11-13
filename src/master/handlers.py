@@ -7,6 +7,7 @@ from tornado.web import HTTPError
 from common.access import scoped, internal, AccessToken, remote_ip
 from common.handler import AuthenticatedHandler
 
+from data.host import HostNotFound
 from data.controller import ControllerError
 from data.player import Player, RoomNotFound, PlayerError, RoomError
 from data.gameserver import GameServerNotFound
@@ -51,6 +52,7 @@ class JoinHandler(AuthenticatedHandler):
         player = Player(self.application, gamespace, game_name, game_version,
                         game_server_name, account, self.token.key, ip)
 
+        lock_my_region = self.get_argument("my_region_only", "false") == "true"
         auto_create = self.get_argument("auto_create", "true") == "true"
 
         try:
@@ -61,7 +63,11 @@ class JoinHandler(AuthenticatedHandler):
             raise HTTPError(404, "No such game server")
 
         try:
-            result = yield player.join(settings, auto_create=auto_create, create_room_settings=create_settings)
+            result = yield player.join(
+                settings,
+                auto_create=auto_create,
+                create_room_settings=create_settings,
+                lock_my_region=lock_my_region)
         except RoomNotFound as e:
             raise HTTPError(404, "No such room found")
         except PlayerError as e:
@@ -159,17 +165,33 @@ class RoomsHandler(AuthenticatedHandler):
 
         rooms_data = self.application.rooms
         hosts = self.application.hosts
+        my_host_only = None
+        ordered_hosts = None
+
+        ignore_full = self.get_argument("ignore_full", "false") == "true"
+        lock_my_region = self.get_argument("my_region_only", "false") == "true"
 
         if geo:
             x, y = geo.location
-            closest_hosts = yield hosts.list_closest_hosts(x, y)
-            ordered_hosts = [host.host_id for host in closest_hosts]
+
+            if lock_my_region:
+                try:
+                    my_host_only = yield hosts.get_closest_host(x, y)
+                except HostNotFound:
+                    pass
+
+            if not my_host_only:
+                closest_hosts = yield hosts.list_closest_hosts(x, y)
+                ordered_hosts = [host.host_id for host in closest_hosts]
         else:
             ordered_hosts = None
 
         rooms = yield rooms_data.list_rooms(
             gamespace, game_name, game_version,
-            game_server_id, settings, ordered_hosts)
+            game_server_id, settings,
+            hosts_order=ordered_hosts,
+            ignore_full=ignore_full,
+            my_host_only=my_host_only)
 
         self.dumps({
             "rooms": [

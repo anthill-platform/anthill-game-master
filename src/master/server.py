@@ -58,6 +58,7 @@ class GameMasterServer(common.server.Server):
             "apps": admin.ApplicationsController,
             "app": admin.ApplicationController,
             "app_version": admin.ApplicationVersionController,
+            "deploy": admin.DeployApplicationController,
 
             "game_server": admin.GameServerController,
             "new_game_server": admin.NewGameServerController,
