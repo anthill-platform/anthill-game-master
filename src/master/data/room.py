@@ -107,9 +107,9 @@ class RoomQuery(object):
             conditions.append("`room_id`=%s")
             data.append(str(self.room_id))
 
-        for condition, value in self.other_conditions:
+        for condition, values in self.other_conditions:
             conditions.append(condition)
-            data.append(value)
+            data.extend(values)
 
         return conditions, data
 
@@ -362,6 +362,7 @@ class RoomsModel(Model):
                 query.add_conditions(conditions)
                 query.hosts_order = hosts_order
                 query.for_update = True
+                query.ignore_full = True
 
                 text, data = query.query()
 
@@ -401,6 +402,7 @@ class RoomsModel(Model):
 
                 query.room_id = room_id
                 query.for_update = True
+                query.ignore_full = True
 
                 text, data = query.query()
 
