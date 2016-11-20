@@ -1,11 +1,13 @@
 
 from tornado.gen import coroutine, Return
-from tornado.web import HTTPError
+from tornado.web import HTTPError, stream_request_body
 
 from common.internal import InternalError
 from common.access import internal
 from common.handler import AuthenticatedHandler
+
 from data.server import SpawnError
+from data.delivery import DeliveryError
 
 import ujson
 
@@ -13,6 +15,41 @@ import ujson
 class InternalHandler(object):
     def __init__(self, application):
         self.application = application
+
+
+@stream_request_body
+class DeliverDeploymentHandler(AuthenticatedHandler):
+    def __init__(self, application, request, **kwargs):
+        super(DeliverDeploymentHandler, self).__init__(application, request, **kwargs)
+        self.delivery = None
+
+    @coroutine
+    @internal
+    def put(self):
+        try:
+            yield self.delivery.complete()
+        except DeliveryError as e:
+            raise HTTPError(e.code, e.message)
+
+    @coroutine
+    def data_received(self, chunk):
+        yield self.delivery.data_received(chunk)
+
+    @coroutine
+    @internal
+    def prepared(self):
+        game_name = self.get_argument("game_name")
+        game_version = self.get_argument("game_version")
+        deployment_id = self.get_argument("deployment_id")
+        deployment_hash = self.get_argument("deployment_hash")
+
+        delivery = self.application.delivery
+
+        try:
+            self.delivery = yield delivery.deliver(
+                game_name, game_version, deployment_id, deployment_hash)
+        except DeliveryError as e:
+            raise HTTPError(e.code, e.message)
 
 
 class SpawnHandler(AuthenticatedHandler):

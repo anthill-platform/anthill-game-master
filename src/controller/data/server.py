@@ -210,6 +210,7 @@ class GameServer(object):
                     credential="dev", username=username, key=password, scopes=scopes,
                     gamespace_id=self.room.gamespace, unique="false")
             except InternalError as e:
+                yield self.__stopped__()
                 raise SpawnError("Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
             else:
                 self.__notify__("Authenticated for server-side use!")
@@ -223,6 +224,7 @@ class GameServer(object):
             try:
                 services = yield common.discover.cache.get_services(discover, network="external")
             except DiscoveryError as e:
+                yield self.__stopped__()
                 raise SpawnError("Failed to discover services for server-side use: " + e.message)
             else:
                 env["discovery:services"] = ujson.dumps(services, escape_forward_slashes=False)

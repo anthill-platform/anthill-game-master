@@ -98,3 +98,10 @@ define("rate_create_room",
        default=(5, 60),
        help="A limit for room creation for user tuple: (amount, time)",
        type=tuple)
+
+# Deployments
+
+define("deployments_location",
+       default="/opt/local/deployments",
+       help="A limit for room creation for user tuple: (amount, time)",
+       type=tuple)

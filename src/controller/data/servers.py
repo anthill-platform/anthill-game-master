@@ -12,6 +12,10 @@ import datetime
 
 
 class GameServersData(Model):
+
+    DEPLOYMENTS = "deployments"
+    RUNTIME = "runtime"
+
     def __init__(self, app,
                  sock_path="/tmp",
                  binaries_path="/opt/gs",

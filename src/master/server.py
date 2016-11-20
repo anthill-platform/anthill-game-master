@@ -16,6 +16,7 @@ from data.gameserver import GameServersModel
 from data.room import RoomsModel
 from data.controller import ControllersClientModel
 from data.host import HostsModel
+from data.deploy import DeploymentModel
 
 import options as _opts
 
@@ -42,6 +43,7 @@ class GameMasterServer(common.server.Server):
         self.gameservers = GameServersModel(self.db)
         self.rooms = RoomsModel(self.db)
         self.hosts = HostsModel(self.db)
+        self.deployments = DeploymentModel(self.db)
 
         self.ctl_client = ControllersClientModel(self.rooms)
 
@@ -50,7 +52,7 @@ class GameMasterServer(common.server.Server):
         })
 
     def get_models(self):
-        return [self.hosts, self.rooms, self.gameservers]
+        return [self.hosts, self.rooms, self.gameservers, self.deployments]
 
     def get_admin(self):
         return {
@@ -59,6 +61,7 @@ class GameMasterServer(common.server.Server):
             "app": admin.ApplicationController,
             "app_version": admin.ApplicationVersionController,
             "deploy": admin.DeployApplicationController,
+            "deployment": admin.ApplicationDeploymentController,
 
             "game_server": admin.GameServerController,
             "new_game_server": admin.NewGameServerController,

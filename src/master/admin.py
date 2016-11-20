@@ -1,15 +1,25 @@
 import json
 
-from tornado.gen import coroutine, Return
+from tornado.gen import coroutine, Return, IOLoop
+import tornado.httpclient
 
 import common.admin as a
 from common.environment import AppNotFound
 
 from data.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
 from data.host import HostNotFound, HostError
+from data.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
+from data.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
+from tornado.concurrent import run_on_executor
+from concurrent.futures import ThreadPoolExecutor
 
 from geoip import geolite2
 import socket
+import logging
+import os
+import zipfile
+import hashlib
+import urllib
 
 
 class ApplicationController(a.AdminController):
@@ -50,11 +60,11 @@ class ApplicationController(a.AdminController):
             a.links("Application '{0}' versions".format(data["app_name"]), links=[
                 a.link("app_version", v_name, icon="tags", app_id=game_name,
                        version_id=v_name) for v_name, v_id in data["versions"].iteritems()
-            ]),
+                ]),
             a.links("Game Servers", links=[
                 a.link("game_server", gs.name, icon="rocket", game_server_id=gs.game_server_id, game_name=game_name)
                 for gs in data["game_servers"]
-            ]),
+                ]),
             a.links("Navigate", [
                 a.link("apps", "Go back"),
                 a.link("new_game_server", "Create Game Server",
@@ -435,10 +445,39 @@ class GameServerVersionController(a.AdminController):
 class ApplicationVersionController(a.AdminController):
 
     @coroutine
+    def switch_deployment(self, **ignored):
+        deployments = self.application.deployments
+
+        game_name = self.context.get("game_name")
+        game_version = self.context.get("game_version")
+        deployment_id = self.context.get("deployment_id")
+
+        try:
+            deployment = yield deployments.get_deployment(self.gamespace, deployment_id)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to get game deployment: " + e.message)
+        except DeploymentNotFound as e:
+            raise a.ActionError("No such deployment")
+
+        if deployment.status != "delivered":
+            raise a.ActionError("Deployment is not delivered yet, cannot switch")
+
+        try:
+            yield deployments.set_current_deployment(self.gamespace, game_name, game_version, deployment_id)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to set game deployment: " + e.message)
+
+        raise a.Redirect("app_version",
+                         message="Deployment has been switched",
+                         app_id=game_name,
+                         version_id=game_version)
+
+    @coroutine
     def get(self, app_id, version_id):
 
         env_service = self.application.env_service
         gameservers = self.application.gameservers
+        deployments = self.application.deployments
 
         try:
             app = yield env_service.get_app_info(self.gamespace, app_id)
@@ -448,12 +487,300 @@ class ApplicationVersionController(a.AdminController):
         try:
             servers = yield gameservers.list_game_servers(self.gamespace, app_id)
         except GameError as e:
-            raise a.ActionError("Failed to list game servers" + e.message)
+            raise a.ActionError("Failed to list game servers: " + e.message)
+
+        try:
+            game_deployments = yield deployments.list_deployments(self.gamespace, app_id, version_id)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to list game deployments: " + e.message)
+
+        try:
+            current_deployment = yield deployments.get_current_deployment(self.gamespace, app_id, version_id)
+        except NoCurrentDeployment:
+            current_deployment = None
+        except DeploymentError as e:
+            raise a.ActionError("Failed to get current deployment: " + e.message)
+        else:
+            current_deployment = current_deployment.deployment_id
 
         result = {
             "app_id": app_id,
             "app_name": app["title"],
-            "servers": servers
+            "servers": servers,
+            "deployments": game_deployments,
+            "current_deployment": current_deployment
+        }
+
+        raise a.Return(result)
+
+    def render(self, data):
+
+        current_deployment = data["current_deployment"]
+
+        r = [
+            a.breadcrumbs([
+                a.link("apps", "Applications"),
+                a.link("app", data["app_name"], record_id=self.context.get("app_id"))
+            ], self.context.get("version_id"))
+        ]
+
+        if not current_deployment:
+            r.append(a.notice(
+                "Warning",
+                "There is no current deployment set for version <b>{0}</b>. "
+                "Therefore, server spawning is not possible. "
+                "Please deploy and switch to required deployment.".format(
+                    self.context.get("version_id")
+                )
+            ))
+
+        r.extend([
+            a.content("Deployments", headers=[
+                {
+                    "id": "id",
+                    "title": "Deployment"
+                }, {
+                    "id": "date",
+                    "title": "Deployment Date"
+                }, {
+                    "id": "status",
+                    "title": "Deployment Status"
+                }, {
+                    "id": "actions",
+                    "title": "Actions"
+                }
+            ], items=[
+                {
+                    "id": [
+                        a.link("deployment", item.deployment_id, icon="folder-o", badge=(
+                            "current" if current_deployment == item.deployment_id else None
+                        ), game_name=self.context.get("app_id"),
+                           game_version=self.context.get("version_id"),
+                           deployment_id=item.deployment_id)
+                    ],
+                    "date": str(item.date),
+                    "status": [
+                        {
+                            DeploymentAdapter.STATUS_UPLOADING: a.status("Uploading", "info", "refresh fa-spin"),
+                            DeploymentAdapter.STATUS_DELIVERING: a.status("Delivering", "info", "refresh fa-spin"),
+                            DeploymentAdapter.STATUS_UPLOADED: a.status("Uploaded", "success", "check"),
+                            DeploymentAdapter.STATUS_DELIVERED: a.status("Delivered", "success", "check"),
+                            DeploymentAdapter.STATUS_ERROR: a.status("Error", "danger", "exclamation-triangle")
+                        }.get(item.status, a.status(item.status, "default", "refresh"))
+                    ],
+                    "actions": [
+                        a.button("app_version", "Set Current", "primary", _method="switch_deployment",
+                                 game_name=self.context.get("app_id"),
+                                 game_version=self.context.get("version_id"),
+                                 deployment_id=item.deployment_id)
+                    ] if (current_deployment != item.deployment_id) else "Current deployment"
+                }
+                for item in data["deployments"]
+                ], style="primary", empty="There is no deployments"),
+
+            a.links("Game Servers configurations for game version {0}".format(self.context.get("version_id")), links=[
+                a.link(
+                    "game_server_version", gs.name, icon="rocket",
+                    game_name=self.context.get("app_id"),
+                    game_version=self.context.get("version_id"),
+                    game_server_id=gs.game_server_id)
+                for gs in data["servers"]
+                ]),
+
+            a.links("Navigate", [
+                a.link("deploy", "Deploy New Game Server", icon="upload",
+                       game_name=self.context.get("app_id"),
+                       game_version=self.context.get("version_id")),
+                a.link("app", "Go back", record_id=self.context.get("app_id"))
+            ])
+        ])
+
+        return r
+
+    def access_scopes(self):
+        return ["game_admin"]
+
+
+class Delivery(object):
+    def __init__(self, application, gamespace):
+        self.application = application
+        self.gamespace = gamespace
+
+    @coroutine
+    def __deliver_host__(self, game_name, game_version, deployment_id, delivery_id, host, deployment_hash):
+        client = tornado.httpclient.AsyncHTTPClient()
+        deployments = self.application.deployments
+        location = deployments.deployments_location
+
+        deployment_path = os.path.join(location, game_name, game_version, deployment_id)
+
+        try:
+            f = open(deployment_path, "r")
+        except Exception as e:
+            yield deployments.update_deployment_delivery_status(
+                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR,
+                str(e))
+
+            raise DeploymentDeliveryError(str(e))
+
+        try:
+            @coroutine
+            def producer(write):
+                while True:
+                    data = f.read(8192)
+                    if not data:
+                        break
+                    yield write(data)
+
+            request = tornado.httpclient.HTTPRequest(
+                url=host.internal_location + "/@deliver_deployment?" + urllib.urlencode({
+                    "game_name": game_name,
+                    "game_version": game_version,
+                    "deployment_id": deployment_id,
+                    "deployment_hash": deployment_hash
+                }),
+                method="PUT",
+                request_timeout=2400,
+                body_producer=producer
+            )
+
+            yield client.fetch(request)
+
+        except Exception as e:
+            yield deployments.update_deployment_delivery_status(
+                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR,
+                str(e))
+
+            raise DeploymentDeliveryError(str(e))
+        finally:
+            try:
+                f.close()
+            except Exception:
+                pass
+
+        yield deployments.update_deployment_delivery_status(
+            self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELIVERED)
+
+    @coroutine
+    def __deliver_upload__(self, game_name, game_version, deployment_id, deliver_list, deployment_hash):
+
+        deployments = self.application.deployments
+
+        tasks = [
+            self.__deliver_host__(game_name, game_version, deployment_id, delivery_id, host, deployment_hash)
+            for delivery_id, host in deliver_list
+        ]
+
+        try:
+            yield tasks
+        except Exception as e:
+            logging.error("Error deliver deployment {0}: {1}".format(
+                deployment_id, str(e)
+            ))
+            yield deployments.update_deployment_status(
+                self.gamespace, deployment_id, DeploymentAdapter.STATUS_ERROR)
+        else:
+            yield deployments.update_deployment_status(
+                self.gamespace, deployment_id, DeploymentAdapter.STATUS_DELIVERED)
+
+    @coroutine
+    def __deliver__(self, game_name, game_version, deployment_id, deployment_hash):
+        hosts = self.application.hosts
+        deployments = self.application.deployments
+
+        try:
+            hosts_list = yield hosts.list_hosts()
+        except HostError as e:
+            raise a.ActionError("Failed to list hosts: " + e.message)
+
+        try:
+            deliveries = yield deployments.list_deployment_deliveries(self.gamespace, deployment_id)
+        except DeploymentDeliveryError as e:
+            raise a.ActionError("Failed to list deliveries: " + e.message)
+
+        deliver_list = []
+        delivery_ids = {
+            item.host_id: item
+            for item in deliveries
+        }
+        host_ids = {
+            item.host_id: item
+            for item in hosts_list
+        }
+
+        for host in hosts_list:
+            if host.host_id not in delivery_ids:
+                new_delivery_id = yield deployments.new_deployment_delivery(
+                    self.gamespace, deployment_id, host.host_id)
+                deliver_list.append((new_delivery_id, host))
+
+        for delivery in deliveries:
+            if delivery.status == DeploymentDeliveryAdapter.STATUS_ERROR:
+                deliver_list.append((delivery.delivery_id, host_ids[delivery.host_id]))
+
+        if not deliver_list:
+            raise a.ActionError("Nothing to deliver")
+
+        try:
+            yield deployments.update_deployment_status(
+                self.gamespace, deployment_id, DeploymentAdapter.STATUS_DELIVERING)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to update deployment status: " + e.message)
+
+        try:
+            yield deployments.update_deployment_deliveries_status(
+                self.gamespace, [
+                    delivery_id
+                    for delivery_id, host in deliver_list
+                    ], DeploymentDeliveryAdapter.STATUS_DELIVERING)
+        except DeploymentDeliveryError as e:
+            yield deployments.update_deployment_status(
+                self.gamespace, deployment_id, DeploymentAdapter.STATUS_ERROR)
+            raise a.ActionError("Failed to update deployment deliveries status: " + e.message)
+
+        IOLoop.current().spawn_callback(
+            self.__deliver_upload__, game_name, game_version, deployment_id, deliver_list, deployment_hash)
+
+
+class ApplicationDeploymentController(a.AdminController):
+    @coroutine
+    def get(self, game_name, game_version, deployment_id):
+
+        env_service = self.application.env_service
+        deployments = self.application.deployments
+        hosts = self.application.hosts
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        try:
+            deployment = yield deployments.get_deployment(self.gamespace, deployment_id)
+        except DeploymentNotFound:
+            raise a.ActionError("No such deployment")
+        else:
+            if (deployment.game_name != game_name) or (deployment.game_version != game_version):
+                raise a.ActionError("Wrong deployment")
+
+        try:
+            deliveries = yield deployments.list_deployment_deliveries(self.gamespace, deployment_id)
+        except DeploymentDeliveryError as e:
+            raise a.ActionError("Failed to fetch deliveries: " + e.message)
+
+        try:
+            hosts_list = yield hosts.list_hosts()
+        except HostError as e:
+            raise a.ActionError("Failed to list hosts: " + e.message)
+
+        result = {
+            "app_name": app["title"],
+            "deployment_status": deployment.status,
+            "deliveries": deliveries,
+            "hosts": {
+                item.host_id: item
+                for item in hosts_list
+            }
         }
 
         raise a.Return(result)
@@ -462,33 +789,120 @@ class ApplicationVersionController(a.AdminController):
         return [
             a.breadcrumbs([
                 a.link("apps", "Applications"),
-                a.link("app", data["app_name"], record_id=self.context.get("app_id"))
-            ], self.context.get("version_id")),
+                a.link("app", data["app_name"], record_id=self.context.get("game_name")),
+                a.link("app_version", self.context.get("game_version"),
+                       app_id=self.context.get("game_name"), version_id=self.context.get("game_version"))
+            ], "Deployment {0}".format(self.context.get("deployment_id"))),
 
-            a.links("Deploy", [
-                a.link("deploy", "Deploy This Game Server", icon="upload",
-                       game_name=self.context.get("app_id"),
-                       game_version=self.context.get("version_id"))
-            ]),
+            a.form("Delivery status (refresh for update)", fields={
+                "deployment_status": a.field("Deployment Status", "status", {
+                    DeploymentAdapter.STATUS_UPLOADING: "info",
+                    DeploymentAdapter.STATUS_DELIVERING: "info",
+                    DeploymentAdapter.STATUS_UPLOADED: "success",
+                    DeploymentAdapter.STATUS_DELIVERED: "success",
+                    DeploymentAdapter.STATUS_ERROR: "danger",
+                }.get(data["deployment_status"], "info"), icon={
+                    DeploymentAdapter.STATUS_UPLOADING: "refresh fa-spin",
+                    DeploymentAdapter.STATUS_DELIVERING: "refresh fa-spin",
+                    DeploymentAdapter.STATUS_UPLOADED: "check",
+                    DeploymentAdapter.STATUS_DELIVERED: "check",
+                    DeploymentAdapter.STATUS_ERROR: "exclamation-triangle",
+                }.get(data["deployment_status"], "refresh fa-spin"))
+            }, methods={
+                "deliver": a.method("Deliver again", "primary")
+            } if data["deployment_status"] not in [
+                DeploymentAdapter.STATUS_DELIVERING,
+                DeploymentAdapter.STATUS_UPLOADING
+            ] else {}, data=data, icon="cloud-upload"),
 
-            a.links("Game Servers configurations for game version {0}".format(self.context.get("version_id")), links=[
-                a.link("game_server_version", gs.name, icon="rocket",
-                       game_name=self.context.get("app_id"),
-                       game_version=self.context.get("version_id"),
-                       game_server_id=gs.game_server_id)
-                for gs in data["servers"]
-            ]),
+            a.content("Host delivery status", [
+                {
+                    "id": "host_name",
+                    "title": "Host Name"
+                },
+                {
+                    "id": "host_location",
+                    "title": "Host Location"
+                },
+                {
+                    "id": "delivery_status",
+                    "title": "Delivery status"
+                },
+            ], [
+                {
+                    "host_name": data["hosts"][item.host_id].name if item.host_id in data["hosts"] else "Unknown",
+                    "host_location": data["hosts"][item.host_id].internal_location
+                    if item.host_id in data["hosts"] else "Unknown",
+                    "delivery_status": [
+                        {
+                            DeploymentDeliveryAdapter.STATUS_DELIVERING:
+                                a.status("Delivering", "info", "refresh fa-spin"),
+                            DeploymentDeliveryAdapter.STATUS_DELIVERED: a.status("Delivered", "success", "check"),
+                            DeploymentDeliveryAdapter.STATUS_ERROR: a.status("Error: " + item.error_reason,
+                                                                             "danger", "exclamation-triangle")
+                        }.get(item.status, a.status(item.status, "default", "refresh")),
+                    ]
+                }
+                for item in data["deliveries"]
+            ], "primary"),
 
             a.links("Navigate", [
-                a.link("app", "Go back", record_id=self.context.get("app_id"))
+                a.link("app_version", "Go back",
+                       app_id=self.context.get("game_name"),
+                       version_id=self.context.get("game_version"))
             ])
         ]
 
     def access_scopes(self):
-        return ["game_admin"]
+        return ["game_deploy_admin"]
+
+    @coroutine
+    def deliver(self, **ignored):
+
+        env_service = self.application.env_service
+        deployments = self.application.deployments
+        hosts = self.application.hosts
+
+        game_name = self.context.get("game_name")
+        game_version = self.context.get("game_version")
+        deployment_id = self.context.get("deployment_id")
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        try:
+            deployment = yield deployments.get_deployment(self.gamespace, deployment_id)
+        except DeploymentNotFound:
+            raise a.ActionError("No such deployment")
+        else:
+            if (deployment.game_name != game_name) or (deployment.game_version != game_version):
+                raise a.ActionError("Wrong deployment")
+
+        deployment_hash = deployment.hash
+
+        delivery = Delivery(self.application, self.gamespace)
+
+        yield delivery.__deliver__(game_name, game_version, deployment_id, deployment_hash)
+
+        raise a.Redirect("deployment",
+                         message="Deployment process started",
+                         game_name=game_name,
+                         game_version=game_version,
+                         deployment_id=deployment_id)
 
 
-class DeployApplicationController(a.AdminController):
+class DeployApplicationController(a.UploadAdminController):
+    executor = ThreadPoolExecutor(max_workers=4)
+
+    def __init__(self, app, token):
+        super(DeployApplicationController, self).__init__(app, token)
+        self.deployment = None
+        self.deployment_file = None
+        self.deployment_path = None
+        self.sha256 = None
+
     @coroutine
     def get(self, game_name, game_version):
 
@@ -505,6 +919,108 @@ class DeployApplicationController(a.AdminController):
 
         raise a.Return(result)
 
+    @coroutine
+    def receive_started(self, filename):
+
+        if not filename.endswith(".zip"):
+            raise a.ActionError("The file passed is not a zip file.")
+
+        game_name = self.context.get("game_name")
+        game_version = self.context.get("game_version")
+
+        deployments = self.application.deployments
+        location = deployments.deployments_location
+
+        env_service = self.application.env_service
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+        else:
+            versions = app["versions"]
+            if not game_version in versions:
+                raise a.ActionError("No such app version")
+
+        if not os.path.isdir(location):
+            raise a.ActionError("Bad deployment location (server error)")
+
+        try:
+            self.deployment = yield deployments.new_deployment(
+                self.gamespace, game_name, game_version, "")
+        except DeploymentError as e:
+            raise a.ActionError(e.message)
+
+        app_location = os.path.join(location, game_name)
+
+        if not os.path.isdir(app_location):
+            os.mkdir(app_location)
+
+        version_location = os.path.join(location, game_name, game_version)
+
+        if not os.path.isdir(version_location):
+            os.mkdir(version_location)
+
+        self.deployment_path = os.path.join(location, game_name, game_version, self.deployment)
+        self.deployment_file = open(self.deployment_path, "w")
+        self.sha256 = hashlib.sha256()
+
+    @coroutine
+    def receive_completed(self):
+
+        deployments = self.application.deployments
+
+        self.deployment_file.close()
+
+        the_zip_file = zipfile.ZipFile(self.deployment_path)
+
+        try:
+            ret = the_zip_file.testzip()
+        except Exception as e:
+            try:
+                yield deployments.update_deployment_status(self.gamespace, self.deployment, "corrupt")
+            except DeploymentError as e:
+                raise a.ActionError("Corrupted deployment, failed to update: " + e.message)
+            raise a.ActionError("Corrupted deployment: " + e.message)
+        else:
+            if ret:
+                try:
+                    yield deployments.update_deployment_status(self.gamespace, self.deployment, "corrupt")
+                except DeploymentError as e:
+                    raise a.ActionError("Corrupted deployment file, failed to update: " + e.message)
+
+                raise a.ActionError("Corrupted deployment file: " + str(ret))
+
+        deployment_hash = self.sha256.hexdigest()
+
+        try:
+            yield deployments.update_deployment_hash(self.gamespace, self.deployment, deployment_hash)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to update hash: " + e.message)
+
+        try:
+            yield deployments.update_deployment_status(self.gamespace, self.deployment, "uploaded")
+        except DeploymentError as e:
+            raise a.ActionError("Failed to update deployment status: " + e.message)
+
+        game_name = self.context.get("game_name")
+        game_version = self.context.get("game_version")
+
+        delivery = Delivery(self.application, self.gamespace)
+
+        yield delivery.__deliver__(game_name, game_version, self.deployment, deployment_hash)
+
+        raise a.Redirect(
+            "app_version",
+            message="Game server has been deployed",
+            app_id=game_name,
+            version_id=game_version)
+
+    @run_on_executor
+    def receive_data(self, chunk):
+        self.deployment_file.write(chunk)
+        self.sha256.update(chunk)
+
     def render(self, data):
         return [
             a.breadcrumbs([
@@ -512,15 +1028,11 @@ class DeployApplicationController(a.AdminController):
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
                 a.link("app_version", self.context.get("game_version"),
                        app_id=self.context.get("game_name"), version_id=self.context.get("game_version"))
-            ], "Deploy"),
+            ], "New Deployment"),
 
-            a.form("Deploy <b>{0}</b> / version <b>{1}</b>".format(
+            a.file_upload("Deploy <b>{0}</b> / version <b>{1}</b>".format(
                 data["app_name"], self.context.get("game_version")
-            ), fields={
-                "binary": a.field("Archived Game Server (*.zip)", "file", "primary")
-            }, methods={
-                "deploy": a.method("Deploy", style="primary")
-            }, data=data, icon="upload"),
+            )),
 
             a.links("Navigate", [
                 a.link("app_version", "Go back",
@@ -531,32 +1043,6 @@ class DeployApplicationController(a.AdminController):
 
     def access_scopes(self):
         return ["game_deploy_admin"]
-
-    @coroutine
-    def deploy(self, binary):
-
-        game_name = self.context.get("game_name")
-        game_version = self.context.get("game_version")
-
-        if not binary:
-            raise a.ActionError("No binary file passed.")
-
-        file = binary[0]
-
-        if not file.name.endswith(".zip"):
-            raise a.ActionError("The file passed is not a zip file.")
-
-        try:
-            pass
-
-        except GameError as e:
-            raise a.ActionError("Failed to deploy game server: " + e.message)
-
-        raise a.Redirect(
-            "deploy",
-            message="Game server has been deployed",
-            game_name=game_name,
-            game_version=game_version)
 
 
 class ApplicationsController(a.AdminController):
@@ -653,7 +1139,8 @@ class NewHostController(a.AdminController):
         return [
             a.form("New host", fields={
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty", order=2),
+                "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty",
+                                             order=2),
                 "host_default": a.field("Is Default?", "switch", "primary", "non-empty", order=3),
             }, methods={
                 "create": a.method("Create", "primary")
@@ -711,9 +1198,13 @@ class HostController(a.AdminController):
             a.breadcrumbs([
                 a.link("hosts", "Hosts")
             ], data["name"]),
+            a.links("Debug", [
+                a.link("debug_host", "Debug this host", icon="bug", host_id=self.context.get("host_id")),
+            ]),
             a.form("Host '{0}' information".format(data["name"]), fields={
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty", order=2),
+                "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty",
+                                             order=2),
                 "geo_location": a.field("Geo location", "readonly", "primary", order=3),
                 "host_default": a.field("Is default?", "switch", "primary", order=4),
             }, methods={
@@ -722,14 +1213,12 @@ class HostController(a.AdminController):
             }, data=data),
             a.form("Update geo location".format(data["name"]), fields={
                 "external_location": a.field("Paste external host name (or IP) to calculate geo location",
-                                       "text", "primary", "non-empty", order=1)
+                                             "text", "primary", "non-empty", order=1)
             }, methods={
                 "update_geo": a.method("Update", "primary", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("hosts", "Go back"),
-                a.link("debug_host", "Debug host", icon="bug", host_id=self.context.get("host_id")),
-                a.link("new_host", "New server", "plus")
+                a.link("hosts", "Go back")
             ])
         ]
 

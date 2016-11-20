@@ -8,6 +8,7 @@ import handlers as h
 
 from data.servers import GameServersData
 from data.room import RoomsData
+from data.delivery import DeliveryModel
 
 import admin
 import options as _opts
@@ -28,13 +29,15 @@ class GameControllerServer(common.server.Server):
             ports_pool_to=options.ports_pool_to)
 
         self.rooms = RoomsData(self)
+        self.delivery = DeliveryModel(self.gs)
 
     def get_internal_handler(self):
         return h.InternalHandler(self)
 
     def get_handlers(self):
         return [
-            (r"/spawn", h.SpawnHandler)
+            (r"/spawn", h.SpawnHandler),
+            (r"/@deliver_deployment", h.DeliverDeploymentHandler)
         ]
 
     def get_admin_stream(self):
