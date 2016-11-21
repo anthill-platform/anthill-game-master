@@ -612,7 +612,7 @@ class Delivery(object):
         deployments = self.application.deployments
         location = deployments.deployments_location
 
-        deployment_path = os.path.join(location, game_name, game_version, deployment_id)
+        deployment_path = os.path.join(location, game_name, game_version, deployment_id + ".zip")
 
         try:
             f = open(deployment_path, "r")
@@ -961,7 +961,7 @@ class DeployApplicationController(a.UploadAdminController):
         if not os.path.isdir(version_location):
             os.mkdir(version_location)
 
-        self.deployment_path = os.path.join(location, game_name, game_version, self.deployment)
+        self.deployment_path = os.path.join(location, game_name, game_version, str(self.deployment) + ".zip")
         self.deployment_file = open(self.deployment_path, "w")
         self.sha256 = hashlib.sha256()
 

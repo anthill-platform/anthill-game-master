@@ -51,8 +51,8 @@ class GameServersData(Model):
         return result
 
     @coroutine
-    def instantiate(self, name, game_id, game_version, game_server_name, room):
-        gs = server.GameServer(self, game_id, game_version, game_server_name, name, room)
+    def instantiate(self, name, game_id, game_version, game_server_name, deployment, room):
+        gs = server.GameServer(self, game_id, game_version, game_server_name, deployment, name, room)
         self.servers[name] = gs
 
         self.sub.subscribe(gs.pub, ["server_updated"])
@@ -65,7 +65,7 @@ class GameServersData(Model):
         self.pub.notify("server_updated", server=server)
 
     @coroutine
-    def spawn(self, game_name, game_version, game_server_name, room):
+    def spawn(self, game_name, game_version, game_server_name, deployment, room):
         name = game_name + "_" + game_server_name + "_" + str(room.id())
 
         game_settings = room.game_settings()
@@ -82,9 +82,9 @@ class GameServersData(Model):
             if "key" in e and "value" in e
         }
 
-        instance = yield self.instantiate(name, game_name, game_version, game_server_name, room)
+        instance = yield self.instantiate(name, game_name, game_version, game_server_name, deployment, room)
 
-        app_path = os.path.join(self.binaries_path, game_name, game_version)
+        app_path = os.path.join(self.binaries_path, GameServersData.RUNTIME, game_name, game_version, deployment)
         
         sock_name = str(os.getpid()) + "_" + name
         sock_path = os.path.join(self.sock_path, sock_name)

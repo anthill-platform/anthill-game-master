@@ -62,6 +62,7 @@ class SpawnHandler(AuthenticatedHandler):
         game_server_name = self.get_argument("game_server_name")
         gamespace = self.get_argument("gamespace")
         room_id = self.get_argument("room_id")
+        deployment = self.get_argument("deployment")
 
         try:
             settings = ujson.loads(self.get_argument("settings"))
@@ -74,7 +75,7 @@ class SpawnHandler(AuthenticatedHandler):
         room = rooms.new(gamespace, room_id, settings)
 
         try:
-            result = yield gs.spawn(game_id, game_version, game_server_name, room)
+            result = yield gs.spawn(game_id, game_version, game_server_name, deployment, room)
         except SpawnError as e:
             raise InternalError(500, "Failed to spawn: " + e.message)
 

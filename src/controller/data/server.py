@@ -85,12 +85,13 @@ class GameServer(object):
     CHECK_PERIOD = 60
     READ_PERIOD_MS = 200
 
-    def __init__(self, gs, game_name, game_version, game_server_name, name, room):
+    def __init__(self, gs, game_name, game_version, game_server_name, deployment, name, room):
         self.gs = gs
 
         self.game_name = game_name
         self.game_version = game_version
         self.game_server_name = game_server_name
+        self.deployment = deployment
 
         self.name = name
         self.room = room

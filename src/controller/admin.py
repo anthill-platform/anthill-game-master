@@ -73,6 +73,7 @@ class DebugController(a.StreamAdminController):
             "game": server.game_name,
             "room_settings": server.room.room_settings(),
             "version": server.game_version,
+            "deployment": server.deployment,
             "name": server.name
         }
 

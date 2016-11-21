@@ -37,6 +37,7 @@ class RoomAdapter(object):
         self.game_name = data.get("game_name")
         self.game_version = data.get("game_version")
         self.max_players = data.get("max_players", 8)
+        self.deployment_id = str(data.get("deployment_id", ""))
 
     def dump(self):
         return {
@@ -306,7 +307,7 @@ class RoomsModel(Model):
 
     @coroutine
     def create_and_join_room(self, gamespace, game_name, game_version, gs, room_settings,
-                             account_id, access_token, host_id, trigger_remove=True):
+                             account_id, access_token, host_id, deployment_id, trigger_remove=True):
 
         max_players = gs.max_players
 
@@ -317,10 +318,10 @@ class RoomsModel(Model):
                 """
                 INSERT INTO `rooms`
                 (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
-                  `max_players`, `location`, `settings`, `state`, `host_id`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE', %s)
+                  `max_players`, `location`, `settings`, `state`, `host_id`, `deployment_id`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE', %s, %s)
                 """, gamespace, game_name, game_version, gs.game_server_id, 1, max_players,
-                "{}", ujson.dumps(room_settings), host_id
+                "{}", ujson.dumps(room_settings), host_id, deployment_id
             )
 
             record_id = yield self.__insert_player__(gamespace, account_id, room_id, key, access_token, self.db,
@@ -486,7 +487,7 @@ class RoomsModel(Model):
 
     @coroutine
     def instantiate(self, gamespace, game_id, game_version, game_server_name,
-                    room_id, server_host, settings):
+                    deployment_id, room_id, server_host, settings):
 
         try:
             result = yield self.internal.post(
@@ -497,6 +498,7 @@ class RoomsModel(Model):
                     "game_server_name": game_server_name,
                     "room_id": room_id,
                     "gamespace": gamespace,
+                    "deployment": deployment_id,
                     "settings": ujson.dumps(settings)
                 }, discover_service=False)
 
@@ -612,11 +614,11 @@ class RoomsModel(Model):
             raise RoomError("Failed to leave a room: " + e.args[1])
 
     @coroutine
-    def spawn_server(self, gamespace, game_id, game_version, game_server_name,
+    def spawn_server(self, gamespace, game_id, game_version, game_server_name, deployment_id,
                      room_id, host, settings):
 
         result = yield self.instantiate(gamespace, game_id, game_version, game_server_name,
-                                        room_id, host.internal_location, settings)
+                                        deployment_id, room_id, host.internal_location, settings)
 
         if "location" not in result:
             raise RoomError("No location in result.")

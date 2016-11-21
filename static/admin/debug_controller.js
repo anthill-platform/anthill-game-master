@@ -260,6 +260,10 @@
                             "value": server.version
                         },
                         {
+                            "title": "Deployment",
+                            "value": server.deployment
+                        },
+                        {
                             "title": "Room Settings",
                             "value": JSON.stringify(server.room_settings),
                             "decorator": "json_view"

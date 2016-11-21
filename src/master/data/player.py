@@ -4,6 +4,7 @@ from tornado.gen import coroutine, Return, sleep
 import tornado.ioloop
 from room import RoomNotFound, RoomError
 from gameserver import GameVersionNotFound
+from deploy import NoCurrentDeployment
 import logging
 
 from common import random_string
@@ -92,6 +93,16 @@ class Player(object):
         }
 
         try:
+            deployment = yield self.app.deployments.get_current_deployment(
+                self.gamespace, self.game_name, self.game_version)
+        except NoCurrentDeployment:
+            raise PlayerError(500, "No deployment defined for {0}/{1}".format(
+                self.game_name, self.game_version
+            ))
+
+        deployment_id = deployment.deployment_id
+
+        try:
             limit = yield self.app.ratelimit.limit("create_room", self.account_id)
         except RateLimitExceeded:
             raise PlayerError(429, "Too many requests")
@@ -101,7 +112,7 @@ class Player(object):
             self.record_id, key, self.room_id = yield self.rooms.create_and_join_room(
                 self.gamespace, self.game_name, self.game_version,
                 self.gs, room_settings, self.account_id, self.access_token,
-                host.host_id, False)
+                host.host_id, deployment_id, False)
 
             logging.info("Created a room: '{0}'".format(self.room_id))
 
@@ -114,7 +125,7 @@ class Player(object):
 
                 result = yield self.rooms.spawn_server(
                     self.gamespace, self.game_name, self.game_version, self.game_server_name,
-                    self.room_id, host, combined_settings
+                    deployment_id, self.room_id, host, combined_settings
                 )
             except RoomError as e:
                 # failed to spawn a server, then leave
