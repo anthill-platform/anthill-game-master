@@ -147,7 +147,7 @@ class RoomQuery(object):
 
 class RoomsModel(Model):
 
-    AUTO_REMOVE_TIME = 10
+    AUTO_REMOVE_TIME = 30
 
     @staticmethod
     def __generate_key__(gamespace_id, account_id):

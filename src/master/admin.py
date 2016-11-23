@@ -1188,7 +1188,8 @@ class HostController(a.AdminController):
             "name": host.name,
             "internal_location": host.internal_location,
             "geo_location": str(host.geo_location),
-            "host_default": "true" if host.default else "false"
+            "host_default": "true" if host.default else "false",
+            "host_enabled": "true" if host.enabled else "false"
         }
 
         raise a.Return(result)
@@ -1202,6 +1203,7 @@ class HostController(a.AdminController):
                 a.link("debug_host", "Debug this host", icon="bug", host_id=self.context.get("host_id")),
             ]),
             a.form("Host '{0}' information".format(data["name"]), fields={
+                "host_enabled": a.field("Enabled (can accept players)", "switch", "primary", order=0),
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
                 "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty",
                                              order=2),
@@ -1226,11 +1228,16 @@ class HostController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def update(self, name, internal_location, host_default="false"):
+    def update(self, name, internal_location, host_default="false", host_enabled="false"):
         host_id = self.context.get("host_id")
         hosts = self.application.hosts
 
-        yield hosts.update_host(host_id, name, internal_location, host_default == "true")
+        yield hosts.update_host(
+            host_id,
+            name,
+            internal_location,
+            host_default == "true",
+            host_enabled == "true")
 
         raise a.Redirect("host",
                          message="Host has been updated",

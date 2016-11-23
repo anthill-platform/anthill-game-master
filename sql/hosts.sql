@@ -4,5 +4,6 @@ CREATE TABLE `hosts` (
   `internal_location` varchar(255) NOT NULL DEFAULT '',
   `geo_location` point NOT NULL,
   `host_default` tinyint(1) NOT NULL DEFAULT '0',
+  `host_enabled` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`host_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

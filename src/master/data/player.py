@@ -13,8 +13,6 @@ from geoip import geolite2
 
 
 class Player(object):
-    AUTO_REMOVE_TIME = 30
-
     def __init__(self, app, gamespace, game_name, game_version, game_server_name, account_id, access_token, ip):
         self.app = app
         self.hosts = app.hosts
