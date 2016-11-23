@@ -251,7 +251,7 @@ class DeploymentModel(Model):
                 """
                 UPDATE `deployment_deliveries`
                 SET `delivery_status`=%s
-                WHERE `gamespace_id`=%s AND `delivery_id` IN (%s);
+                WHERE `gamespace_id`=%s AND `delivery_id` IN %s;
                 """, status, gamespace_id, delivery_ids
             )
         except common.database.DatabaseError as e:
