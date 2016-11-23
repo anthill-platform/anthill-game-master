@@ -500,7 +500,7 @@ class RoomsModel(Model):
                     "gamespace": gamespace,
                     "deployment": deployment_id,
                     "settings": ujson.dumps(settings)
-                }, discover_service=False)
+                }, discover_service=False, timeout=60)
 
         except InternalError as e:
             raise RoomError("Failed to spawn a new game server: " + str(e.code) + " " + e.body)
