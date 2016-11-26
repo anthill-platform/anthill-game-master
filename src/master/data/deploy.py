@@ -1,6 +1,9 @@
 
 from tornado.gen import coroutine, Return
 import common.database
+
+
+from common import clamp
 from common.model import Model
 from common.options import options
 
@@ -187,6 +190,39 @@ class DeploymentModel(Model):
             raise DeploymentNotFound()
 
         raise Return(DeploymentAdapter(deployment))
+
+    @coroutine
+    def list_paged_deployments(self, gamespace_id, game_name, game_version, items_in_page, page=1):
+        try:
+            with (yield self.db.acquire()) as db:
+                pages_count = yield db.get(
+                    """
+                        SELECT COUNT(*) as `count`
+                        FROM `deployments`
+                        WHERE gamespace_id=%s AND `game_name`=%s AND `game_version`=%s;
+                    """, gamespace_id, game_name, game_version)
+
+                import math
+                pages = int(math.ceil(float(pages_count["count"]) / float(items_in_page)))
+
+                page = clamp(page, 1, pages)
+
+                limit_a = (page - 1) * items_in_page
+                limit_b = page * items_in_page
+
+                deployments = yield db.query(
+                    """
+                    SELECT *
+                    FROM `deployments`
+                    WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s
+                    ORDER BY `deployment_id` DESC
+                    LIMIT %s, %s;
+                    """, gamespace_id, game_name, game_version, limit_a, limit_b
+                )
+        except common.database.DatabaseError as e:
+            raise DeploymentError("Failed to get deployment: " + e.args[1])
+
+        raise Return((map(DeploymentAdapter, deployments), pages))
 
     @coroutine
     def list_deployments(self, gamespace_id, game_name, game_version):

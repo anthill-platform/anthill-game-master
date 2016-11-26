@@ -10,6 +10,8 @@ from data.gameserver import GameError, GameServerNotFound, GameVersionNotFound, 
 from data.host import HostNotFound, HostError
 from data.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
 from data.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
+from data.ban import NoSuchBan, BanError, UserAlreadyBanned
+
 from tornado.concurrent import run_on_executor
 from concurrent.futures import ThreadPoolExecutor
 
@@ -20,6 +22,7 @@ import os
 import zipfile
 import hashlib
 import urllib
+import datetime
 
 
 class ApplicationController(a.AdminController):
@@ -444,6 +447,8 @@ class GameServerVersionController(a.AdminController):
 
 class ApplicationVersionController(a.AdminController):
 
+    DEPLOYMENTS_PER_PAGE = 10
+
     @coroutine
     def switch_deployment(self, **ignored):
         deployments = self.application.deployments
@@ -473,7 +478,7 @@ class ApplicationVersionController(a.AdminController):
                          version_id=game_version)
 
     @coroutine
-    def get(self, app_id, version_id):
+    def get(self, app_id, version_id, page=1):
 
         env_service = self.application.env_service
         gameservers = self.application.gameservers
@@ -490,7 +495,8 @@ class ApplicationVersionController(a.AdminController):
             raise a.ActionError("Failed to list game servers: " + e.message)
 
         try:
-            game_deployments = yield deployments.list_deployments(self.gamespace, app_id, version_id)
+            game_deployments, pages = yield deployments.list_paged_deployments(
+                self.gamespace, app_id, version_id, ApplicationVersionController.DEPLOYMENTS_PER_PAGE, page)
         except DeploymentError as e:
             raise a.ActionError("Failed to list game deployments: " + e.message)
 
@@ -508,6 +514,7 @@ class ApplicationVersionController(a.AdminController):
             "app_name": app["title"],
             "servers": servers,
             "deployments": game_deployments,
+            "pages": pages,
             "current_deployment": current_deployment
         }
 
@@ -577,7 +584,12 @@ class ApplicationVersionController(a.AdminController):
                 }
                 for item in data["deployments"]
                 ], style="primary", empty="There is no deployments"),
+        ])
 
+        if data["pages"] > 1:
+            r.append(a.pages(data["pages"]))
+
+        r.extend([
             a.links("Game Servers configurations for game version {0}".format(self.context.get("version_id")), links=[
                 a.link(
                     "game_server_version", gs.name, icon="rocket",
@@ -1159,7 +1171,8 @@ class RootAdminController(a.AdminController):
         return [
             a.links("Game service", [
                 a.link("apps", "Applications", icon="mobile"),
-                a.link("hosts", "Hosts", icon="server")
+                a.link("hosts", "Hosts", icon="server"),
+                a.link("bans", "Bans", icon="ban")
             ])
         ]
 
@@ -1299,3 +1312,218 @@ class HostsController(a.AdminController):
 
     def access_scopes(self):
         return ["discovery_admin"]
+
+
+class BansController(a.AdminController):
+    def render(self, data):
+        return [
+            a.breadcrumbs([], "Bans"),
+            a.links("Bans", [
+                a.link("find_ban", "Find A Ban", icon="search"),
+                a.link("new_ban", "Issue A Ban", icon="plus")
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]
+
+
+class FindBanController(a.AdminController):
+    def render(self, data):
+        return [
+            a.breadcrumbs([
+                a.link("bans", "Bans")
+            ], "Find A Ban"),
+            a.split([
+                a.form(title="Find by ID", fields={
+                    "ban_id": a.field("Ban ID", "text", "primary", "number"),
+                }, methods={
+                    "search_id": a.method("Search", "primary")
+                }, data=data),
+                a.form(title="Find by ip", fields={
+                    "ip": a.field("User IP", "text", "primary", "non-empty"),
+                }, methods={
+                    "search_ip": a.method("Search", "primary")
+                }, data=data),
+                a.form(title="Find by account number", fields={
+                    "account": a.field("Account number", "text", "primary", "number")
+                }, methods={
+                    "search_account": a.method("Search", "primary")
+                }, data=data)
+            ]),
+            a.links("Navigate", [
+                a.link("index", "Go back")
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]
+
+    @coroutine
+    def search_account(self, account):
+        bans = self.application.bans
+
+        try:
+            ban = yield bans.get_ban_by_account(self.gamespace, account)
+        except NoSuchBan:
+            raise a.ActionError("No such ban")
+
+        raise a.Redirect("ban", ban_id=ban.ban_id)
+
+    @coroutine
+    def search_ip(self, ip):
+        bans = self.application.bans
+
+        try:
+            ban_id = yield bans.get_ban_by_ip(self.gamespace, ip)
+        except NoSuchBan:
+            raise a.ActionError("No such ban")
+
+        raise a.Redirect("ban", ban_id=ban_id)
+
+    @coroutine
+    def search_id(self, ban_id):
+        bans = self.application.bans
+
+        try:
+            yield bans.get_ban(self.gamespace, ban_id)
+        except NoSuchBan:
+            raise a.ActionError("No such ban")
+
+        raise a.Redirect("ban", ban_id=ban_id)
+
+
+class IssueBanController(a.AdminController):
+
+    @coroutine
+    def get(self):
+        raise Return({
+            "expires": str(datetime.datetime.now() + datetime.timedelta(days=7))
+        })
+
+    def render(self, data):
+        return [
+            a.breadcrumbs([
+                a.link("bans", "Bans")
+            ], "Issue a Ban"),
+
+            a.form("New ban", fields={
+                "account_id": a.field(
+                    "Account ID",
+                    "text", "primary", "number", order=0),
+                "reason": a.field(
+                    "Reason",
+                    "text", "primary", "non-empty", order=1),
+                "expires": a.field(
+                    "Expires",
+                    "date", "primary", "non-empty", order=2)
+            }, methods={
+                "create": a.method("Create", "primary", order=1)
+            }, data=data),
+            a.links("Navigate", [
+                a.link("bans", "Go back")
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]
+
+    @coroutine
+    def create(self, account_id, expires, reason):
+
+        bans = self.application.bans
+
+        try:
+            ban_id = yield bans.new_ban(self.gamespace, account_id, expires, reason)
+        except UserAlreadyBanned:
+            raise a.ActionError("User already banned")
+        except BanError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect(
+            "ban",
+            message="Ban has been issued",
+            ban_id=ban_id)
+
+
+class BanController(a.AdminController):
+
+    @coroutine
+    def get(self, ban_id):
+
+        bans = self.application.bans
+
+        try:
+            ban = yield bans.get_ban(self.gamespace, ban_id)
+        except NoSuchBan:
+            raise a.ActionError("No such ban")
+        except BanError as e:
+            raise a.ActionError(e.message)
+
+        raise Return({
+            "account_id": ban.account,
+            "expires": str(ban.expires),
+            "ip": ban.ip,
+            "reason": ban.reason
+        })
+
+    def render(self, data):
+        return [
+            a.breadcrumbs([
+                a.link("bans", "Bans")
+            ], self.context.get("ban_id")),
+
+            a.form("Ban", fields={
+                "account_id": a.field(
+                    "Account ID",
+                    "readonly", "primary", "number", order=0),
+                "reason": a.field(
+                    "Reason",
+                    "text", "primary", "non-empty", order=1),
+                "expires": a.field(
+                    "Expires",
+                    "date", "primary", "non-empty", order=2)
+            }, methods={
+                "update": a.method("Update", "primary", order=2),
+                "delete": a.method("Delete", "danger", order=1)
+            }, data=data),
+            a.links("Navigate", [
+                a.link("bans", "Go back")
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]
+
+    @coroutine
+    def update(self, expires, reason, **ignored):
+
+        bans = self.application.bans
+
+        ban_id = self.context.get("ban_id")
+
+        try:
+            yield bans.update_ban(self.gamespace, ban_id, expires, reason)
+        except BanError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect(
+            "ban",
+            message="Ban has been updated",
+            ban_id=ban_id)
+
+    @coroutine
+    def delete(self, **ignored):
+
+        bans = self.application.bans
+
+        ban_id = self.context.get("ban_id")
+
+        try:
+            yield bans.delete_ban(self.gamespace, ban_id)
+        except BanError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect(
+            "bans",
+            message="Ban has been deleted")

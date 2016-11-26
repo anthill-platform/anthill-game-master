@@ -17,6 +17,7 @@ from data.room import RoomsModel
 from data.controller import ControllersClientModel
 from data.host import HostsModel
 from data.deploy import DeploymentModel
+from data.ban import BansModel
 
 import options as _opts
 
@@ -44,6 +45,7 @@ class GameMasterServer(common.server.Server):
         self.rooms = RoomsModel(self.db)
         self.hosts = HostsModel(self.db)
         self.deployments = DeploymentModel(self.db)
+        self.bans = BansModel(self.db)
 
         self.ctl_client = ControllersClientModel(self.rooms)
 
@@ -52,7 +54,7 @@ class GameMasterServer(common.server.Server):
         })
 
     def get_models(self):
-        return [self.hosts, self.rooms, self.gameservers, self.deployments]
+        return [self.hosts, self.rooms, self.gameservers, self.deployments, self.bans]
 
     def get_admin(self):
         return {
@@ -70,7 +72,12 @@ class GameMasterServer(common.server.Server):
             "hosts": admin.HostsController,
             "host": admin.HostController,
             "debug_host": admin.DebugHostController,
-            "new_host": admin.NewHostController
+            "new_host": admin.NewHostController,
+
+            "bans": admin.BansController,
+            "new_ban": admin.IssueBanController,
+            "find_ban": admin.FindBanController,
+            "ban": admin.BanController
         }
 
     def get_admin_stream(self):

@@ -9,7 +9,7 @@ from common.handler import AuthenticatedHandler
 
 from data.host import HostNotFound
 from data.controller import ControllerError
-from data.player import Player, RoomNotFound, PlayerError, RoomError
+from data.player import Player, RoomNotFound, PlayerError, RoomError, PlayerBanned
 from data.gameserver import GameServerNotFound
 from common.internal import InternalError
 
@@ -57,6 +57,13 @@ class JoinHandler(AuthenticatedHandler):
 
         try:
             yield player.init()
+        except PlayerBanned as e:
+            ban = e.ban
+            self.set_header("X-Ban-Until", ban.expires)
+            self.set_header("X-Ban-Id", ban.ban_id)
+            self.set_header("X-Ban-Reason", ban.reason)
+            self.set_status(423, "You have been banned until: " + str(ban.expires))
+            return
         except PlayerError as e:
             raise HTTPError(e.code, e.message)
         except GameServerNotFound:
@@ -83,6 +90,20 @@ class JoinRoomHandler(AuthenticatedHandler):
 
         gamespace = self.token.get(AccessToken.GAMESPACE)
         account = self.token.account
+
+        ip = remote_ip(self.request)
+
+        if ip is None:
+            raise HTTPError(400, "Bad IP")
+
+        ban = yield self.application.bans.lookup_ban(gamespace, account, ip)
+
+        if ban:
+            self.set_header("X-Ban-Until", ban.expires)
+            self.set_header("X-Ban-Id", ban.ban_id)
+            self.set_header("X-Ban-Reason", ban.reason)
+            self.set_status(423, "You have been banned until: " + str(ban.expires))
+            return
 
         try:
             record_id, key, room = yield self.application.rooms.join_room(
@@ -124,6 +145,13 @@ class CreateHandler(AuthenticatedHandler):
 
         try:
             yield player.init()
+        except PlayerBanned as e:
+            ban = e.ban
+            self.set_header("X-Ban-Until", ban.expires)
+            self.set_header("X-Ban-Id", ban.ban_id)
+            self.set_header("X-Ban-Reason", ban.reason)
+            self.set_status(423, "You have been banned until: " + str(ban.expires))
+            return
         except PlayerError as e:
             raise HTTPError(e.code, e.message)
         except GameServerNotFound:

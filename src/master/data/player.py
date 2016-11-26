@@ -12,12 +12,18 @@ from common.ratelimit import RateLimitExceeded
 from geoip import geolite2
 
 
+class PlayerBanned(Exception):
+    def __init__(self, ban):
+        self.ban = ban
+
+
 class Player(object):
     def __init__(self, app, gamespace, game_name, game_version, game_server_name, account_id, access_token, ip):
         self.app = app
         self.hosts = app.hosts
         self.rooms = app.rooms
         self.gameservers = app.gameservers
+        self.bans = app.bans
         self.gamespace = gamespace
         self.ip = ip
 
@@ -53,6 +59,11 @@ class Player(object):
 
             if self.server_settings is None:
                 raise PlayerError(500, "No default version configuration")
+
+        ban = yield self.bans.lookup_ban(self.gamespace, self.account_id, self.ip)
+
+        if ban:
+            raise PlayerBanned(ban)
 
     @coroutine
     def get_closest_host(self):
@@ -133,14 +144,14 @@ class Player(object):
                 yield limit.rollback()
                 raise e
 
-            self.rooms.trigger_remove_temp_reservation(self.gamespace, self.room_id, self.account_id)
-
             updated_room_settings = result.get("settings")
 
             if updated_room_settings:
                 room_settings.update(updated_room_settings)
 
                 yield self.rooms.update_room_settings(self.gamespace, self.room_id, room_settings)
+
+            self.rooms.trigger_remove_temp_reservation(self.gamespace, self.room_id, self.account_id)
 
             result.update({
                 "id": self.room_id,
