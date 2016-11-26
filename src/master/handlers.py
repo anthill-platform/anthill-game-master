@@ -13,6 +13,8 @@ from data.player import Player, RoomNotFound, PlayerError, RoomError, PlayerBann
 from data.gameserver import GameServerNotFound
 from common.internal import InternalError
 
+import logging
+
 from geoip import geolite2
 
 
@@ -59,6 +61,9 @@ class JoinHandler(AuthenticatedHandler):
             yield player.init()
         except PlayerBanned as e:
             ban = e.ban
+
+            logging.info("Banned user trying to join a game: @{0} ban {1}".format(ban.account, ban.ban_id))
+
             self.set_header("X-Ban-Until", ban.expires)
             self.set_header("X-Ban-Id", ban.ban_id)
             self.set_header("X-Ban-Reason", ban.reason)
@@ -99,6 +104,9 @@ class JoinRoomHandler(AuthenticatedHandler):
         ban = yield self.application.bans.lookup_ban(gamespace, account, ip)
 
         if ban:
+
+            logging.info("Banned user trying to join a game: @{0} ban {1}".format(ban.account, ban.ban_id))
+
             self.set_header("X-Ban-Until", ban.expires)
             self.set_header("X-Ban-Id", ban.ban_id)
             self.set_header("X-Ban-Reason", ban.reason)
@@ -147,6 +155,9 @@ class CreateHandler(AuthenticatedHandler):
             yield player.init()
         except PlayerBanned as e:
             ban = e.ban
+
+            logging.info("Banned user trying to join a game: @{0} ban {1}".format(ban.account, ban.ban_id))
+            
             self.set_header("X-Ban-Until", ban.expires)
             self.set_header("X-Ban-Id", ban.ban_id)
             self.set_header("X-Ban-Reason", ban.reason)
