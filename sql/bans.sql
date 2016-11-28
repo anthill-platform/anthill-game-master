@@ -6,7 +6,6 @@ CREATE TABLE `bans` (
   `ban_ip` varchar(64) DEFAULT NULL,
   `ban_expires` datetime NOT NULL,
   PRIMARY KEY (`ban_id`),
-  UNIQUE KEY `ban_account_2` (`ban_account`),
   KEY `ban_account` (`ban_account`),
   KEY `ban_ip` (`ban_ip`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
