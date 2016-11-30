@@ -28,7 +28,7 @@ class BufferedLog(object):
     def __init__(self, callback):
         self.buffer = []
         self.callback = callback
-        self.log = ""
+        self.log = u""
 
     def add(self, data):
         if not self.buffer:
@@ -41,7 +41,7 @@ class BufferedLog(object):
 
     def flush(self):
         if self.buffer:
-            data = "\n".join(self.buffer) + "\n"
+            data = u"\n".join(self.buffer) + u"\n"
             self.log += data
             self.callback(data)
             self.buffer = []
@@ -211,7 +211,7 @@ class GameServer(object):
                     credential="dev", username=username, key=password, scopes=scopes,
                     gamespace_id=self.room.gamespace, unique="false")
             except InternalError as e:
-                yield self.__stopped__()
+                yield self.crashed("Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
                 raise SpawnError("Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
             else:
                 self.__notify__("Authenticated for server-side use!")
@@ -225,7 +225,7 @@ class GameServer(object):
             try:
                 services = yield common.discover.cache.get_services(discover, network="external")
             except DiscoveryError as e:
-                yield self.__stopped__()
+                yield self.crashed("Failed to discover services for server-side use: " + e.message)
                 raise SpawnError("Failed to discover services for server-side use: " + e.message)
             else:
                 env["discovery:services"] = ujson.dumps(services, escape_forward_slashes=False)
@@ -274,7 +274,7 @@ class GameServer(object):
         except OSError as e:
             reason = "Failed to spawn a server: " + e.args[1]
             self.__notify__(reason)
-            yield self.__stopped__()
+            yield self.crashed(reason)
 
             raise SpawnError(reason)
         else:
@@ -367,11 +367,16 @@ class GameServer(object):
         self.ioloop.spawn_callback(self.__stopped__)
 
     @coroutine
-    def __stopped__(self):
-        if self.status == GameServer.STATUS_STOPPED:
+    def crashed(self, reason):
+        self.__notify__(reason)
+        yield self.__stopped__(GameServer.STATUS_ERROR)
+
+    @coroutine
+    def __stopped__(self, reason=STATUS_STOPPED):
+        if self.status == reason:
             return
 
-        self.set_status(GameServer.STATUS_STOPPED)
+        self.set_status(reason)
 
         self.__notify__("Stopped.")
         self.log.flush()
@@ -390,11 +395,13 @@ class GameServer(object):
 
     @coroutine
     def release(self):
-        yield self.msg.release()
+        if self.msg:
+            yield self.msg.release()
 
         # put back the ports acquired at spawn
-        for port in self.ports:
-            self.gs.pool.put(port)
+        if self.ports:
+            for port in self.ports:
+                self.gs.pool.put(port)
 
         self.ports = []
 

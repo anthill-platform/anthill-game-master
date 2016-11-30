@@ -55,7 +55,8 @@ class Room(object):
 
     @coroutine
     def update_settings(self, result, settings, *args, **kwargs):
-        self.room_settings().update(settings)
+        if settings:
+            self.room_settings().update(settings)
 
     def room_settings(self):
         return self.settings["room"]

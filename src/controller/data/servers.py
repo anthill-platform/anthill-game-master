@@ -95,6 +95,7 @@ class GameServersData(Model):
             logging.error("Failed to spawn server instance: " + e.message)
             import sys
             t, v, tb = sys.exc_info()
+            yield instance.crashed("Failed to spawn server instance: " + e.message)
             raise t, v, tb
 
         logging.info("New server instance spawned: " + name)

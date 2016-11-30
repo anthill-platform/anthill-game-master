@@ -37,7 +37,7 @@ class DeliverDeploymentHandler(AuthenticatedHandler):
 
     @coroutine
     @internal
-    def prepared(self):
+    def prepared(self, *args, **kwargs):
         game_name = self.get_argument("game_name")
         game_version = self.get_argument("game_version")
         deployment_id = self.get_argument("deployment_id")
@@ -77,6 +77,6 @@ class SpawnHandler(AuthenticatedHandler):
         try:
             result = yield gs.spawn(game_id, game_version, game_server_name, deployment, room)
         except SpawnError as e:
-            raise InternalError(500, "Failed to spawn: " + e.message)
+            raise HTTPError(500, "Failed to spawn: " + e.message)
 
         self.dumps(result)

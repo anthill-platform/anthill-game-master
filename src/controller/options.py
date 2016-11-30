@@ -4,12 +4,12 @@ from common.options import define
 # Main
 
 define("host",
-       default="http://game-ctl-dev.anthill.local",
+       default="http://game-ctl-dev.anthill",
        help="Public hostname of this service",
        type=str)
 
 define("gs_host",
-       default="game-ctl-dev.anthill.local",
+       default="game-ctl-dev.anthill",
        help="Public hostname of this service for games (without protocol)",
        type=str)
 
