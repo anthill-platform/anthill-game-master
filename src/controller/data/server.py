@@ -34,7 +34,7 @@ class BufferedLog(object):
         if not self.buffer:
             tornado.ioloop.IOLoop.current().add_timeout(
                 datetime.timedelta(seconds=BufferedLog.COLLECT_TIME), self.flush)
-        self.buffer.append(data)
+        self.buffer.append(unicode(data, 'utf-8'))
 
     def get_log(self):
         return self.log
