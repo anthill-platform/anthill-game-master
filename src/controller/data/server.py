@@ -1,3 +1,4 @@
+# coding=utf-8
 
 from tornado.gen import coroutine, Return, sleep, with_timeout, Task, TimeoutError
 from tornado.ioloop import PeriodicCallback
@@ -49,7 +50,7 @@ class BufferedLog(object):
 
 class LineStream:
     def __init__(self):
-        self.stream = ""
+        self.stream = u""
 
     def add(self, data, callback):
 
@@ -59,11 +60,11 @@ class LineStream:
         self.stream += data
 
         while True:
-            index = self.stream.find("\n")
+            index = self.stream.find(u"\n")
             if index >= 0:
                 string = self.stream[:index]
                 self.stream = self.stream[index + 1:]
-                callback(string.replace("\n", "<br>"))
+                callback(string.replace(u"\n", u"<br>"))
             else:
                 break
 
@@ -147,16 +148,16 @@ class GameServer(object):
         try:
             response = yield self.msg.request(self, "status")
         except common.jsonrpc.JsonRPCTimeout:
-            self.__notify__("Timeout to check status")
+            self.__notify__(u"Timeout to check status")
             yield self.terminate(False)
         else:
             if not isinstance(response, dict):
                 status = "not_a_dict"
             else:
                 status = response.get("status", "bad")
-            self.__notify__("Status: " + status)
+            self.__notify__(u"Status: " + unicode(status))
             if status != "ok":
-                self.__notify__("Bad status")
+                self.__notify__(u"Bad status")
                 yield self.terminate(False)
 
     @coroutine
@@ -168,7 +169,7 @@ class GameServer(object):
 
         self.room.update_settings({}, settings)
 
-        self.__notify__("Inited.")
+        self.__notify__(u"Inited.")
         self.set_status(GameServer.STATUS_RUNNING)
         self.check_cb.start()
 
@@ -194,7 +195,7 @@ class GameServer(object):
         authenticate = token.get("authenticate", False)
 
         if authenticate:
-            self.__notify__("Authenticating for server-side use.")
+            self.__notify__(u"Authenticating for server-side use.")
 
             username = token.get("username")
             password = token.get("password")
@@ -211,16 +212,18 @@ class GameServer(object):
                     credential="dev", username=username, key=password, scopes=scopes,
                     gamespace_id=self.room.gamespace, unique="false")
             except InternalError as e:
-                yield self.crashed("Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
+                yield self.crashed(
+                    u"Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
+
                 raise SpawnError("Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
             else:
-                self.__notify__("Authenticated for server-side use!")
+                self.__notify__(u"Authenticated for server-side use!")
                 env["login:access_token"] = access_token["token"]
 
         discover = game_settings.get("discover", [])
 
         if discover:
-            self.__notify__("Discovering services for server-side use.")
+            self.__notify__(u"Discovering services for server-side use.")
 
             try:
                 services = yield common.discover.cache.get_services(discover, network="external")
@@ -236,13 +239,13 @@ class GameServer(object):
     def spawn(self, path, binary, sock_path, cmd_arguments, env, room):
 
         if not os.path.isdir(path):
-            raise SpawnError("Game server is not deployed yet")
+            raise SpawnError(u"Game server is not deployed yet")
 
         if not os.path.isfile(os.path.join(path, binary)):
-            raise SpawnError("Game server binary is not deployed yet")
+            raise SpawnError(u"Game server binary is not deployed yet")
 
         if not isinstance(env, dict):
-            raise SpawnError("env is not a dict")
+            raise SpawnError(u"env is not a dict")
 
         env.update((yield self.__prepare__(room)))
 
@@ -260,19 +263,19 @@ class GameServer(object):
         arguments.extend(cmd_arguments)
 
         cmd = " ".join(arguments)
-        self.__notify__("Spawning: " + cmd)
+        self.__notify__(u"Spawning: " + cmd)
 
-        self.__notify__("Environment:")
+        self.__notify__(u"Environment:")
 
         for name, value in env.iteritems():
-            self.__notify__("  " + name + " = " + value + ";")
+            self.__notify__(u"  " + name + u" = " + value + u";")
 
         self.set_status(GameServer.STATUS_INITIALIZING)
 
         try:
             self.pipe = asyncproc.Process(cmd, shell=True, cwd=path, preexec_fn=os.setsid, env=env)
         except OSError as e:
-            reason = "Failed to spawn a server: " + e.args[1]
+            reason = u"Failed to spawn a server: " + e.args[1]
             self.__notify__(reason)
             yield self.crashed(reason)
 
@@ -281,13 +284,13 @@ class GameServer(object):
             self.set_status(GameServer.STATUS_LOADING)
             self.read_cb.start()
 
-        self.__notify__("Server '{0}' spawned, waiting for init command.".format(self.name))
+        self.__notify__(u"Server '{0}' spawned, waiting for init command.".format(self.name))
 
         def wait(callback):
             @coroutine
             def stopped(*args, **kwargs):
                 self.__clear_handle__("stopped")
-                callback(SpawnError("Stopped before 'inited' command received."))
+                callback(SpawnError(u"Stopped before 'inited' command received."))
 
             @coroutine
             def inited(settings=None):
@@ -320,9 +323,9 @@ class GameServer(object):
 
             raise Return(settings)
         except TimeoutError:
-            self.__notify__("Timeout to spawn.")
+            self.__notify__(u"Timeout to spawn.")
             yield self.terminate(True)
-            raise SpawnError("Failed to spawn a game server: timeout")
+            raise SpawnError(u"Failed to spawn a game server: timeout")
 
     @coroutine
     def send_stdin(self, data):
@@ -330,12 +333,12 @@ class GameServer(object):
 
     @coroutine
     def terminate(self, kill=False):
-        self.__notify__("Terminating... (kill={0})".format(kill))
+        self.__notify__(u"Terminating... (kill={0})".format(kill))
 
         try:
             self.pipe.kill(signal.SIGKILL if kill else signal.SIGTERM)
         except OSError as e:
-            self.__notify__("Server terminate error: " + e.args[1])
+            self.__notify__(u"Server terminate error: " + e.args[1])
             if kill:
                 yield self.__stopped__()
             else:
@@ -378,7 +381,7 @@ class GameServer(object):
 
         self.set_status(reason)
 
-        self.__notify__("Stopped.")
+        self.__notify__(u"Stopped.")
         self.log.flush()
 
         # notify the master server that this server is died
@@ -407,7 +410,7 @@ class GameServer(object):
 
     def __flush_log__(self, data):
         self.pub.notify("log", name=self.name, data=data)
-        logging.info("[{0}] {1}".format(self.name, data))
+        logging.info(u"[{0}] {1}".format(self.name, data))
 
     def __notify__(self, data):
         self.log.add(data)

@@ -20,12 +20,14 @@ __author__ = "Thomas Bellman <bellman@lysator.liu.se>"
 __url__ = "http://www.lysator.liu.se/~bellman/download/"
 __licence__ = "GNU General Publice License version 3 or later"
 
+
 import os
 import time
 import errno
 import signal
 import threading
 import subprocess
+import codecs
 
 __all__ = ['Process', 'with_timeout', 'Timeout']
 
@@ -116,11 +118,11 @@ class Process(object):
         """
 
         while True:
-            data = os.read(source.fileno(), 65536)
+            data = unicode(os.read(source.fileno(), 65536), 'utf-8')
             self.__lock.acquire()
             collector.append(data)
             self.__lock.release()
-            if data == "":
+            if data == u"":
                 source.close()
                 break
         return
@@ -183,9 +185,9 @@ class Process(object):
         """
 
         self.__lock.acquire()
-        outdata = "".join(self.__collected_outdata)
+        outdata = u"".join(self.__collected_outdata)
         del self.__collected_outdata[:]
-        errdata = "".join(self.__collected_errdata)
+        errdata = u"".join(self.__collected_errdata)
         del self.__collected_errdata[:]
         self.__lock.release()
         return outdata, errdata
@@ -196,7 +198,7 @@ class Process(object):
         """
 
         self.__lock.acquire()
-        errdata = "".join(self.__collected_errdata)
+        errdata = u"".join(self.__collected_errdata)
         del self.__collected_errdata[:]
         self.__lock.release()
         return errdata
