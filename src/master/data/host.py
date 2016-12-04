@@ -41,7 +41,7 @@ class HostsModel(Model):
                 INSERT INTO `hosts`
                 (`host_name`, `internal_location`, `geo_location`, `host_default`, `host_enabled`)
                 VALUES (%s, %s, point(0, 0), %s, %s)
-                """, name, internal_location, int(bool(default), 0)
+                """, name, internal_location, int(bool(default)), 0
             )
         except common.database.DatabaseError as e:
             raise HostError("Failed to create a host: " + e.args[1])
