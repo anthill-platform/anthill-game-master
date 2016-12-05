@@ -5,6 +5,22 @@ from common.model import Model
 
 
 class HostError(Exception):
+    def __init__(self, message):
+        self.message = message
+
+    def __str__(self):
+        return self.message
+
+
+class RegionError(Exception):
+    def __init__(self, message):
+        self.message = message
+
+    def __str__(self):
+        return self.message
+
+
+class RegionNotFound(Exception):
     pass
 
 
@@ -19,7 +35,14 @@ class HostAdapter(object):
         self.internal_location = data.get("internal_location")
         self.geo_location = tuple((data.get("geo_location_x", 0), data.get("geo_location_y", 0)))
         self.default = data.get("host_default", 0)
+        self.region = data.get("host_region")
         self.enabled = data.get("host_enabled", 0) == 1
+
+
+class RegionAdapter(object):
+    def __init__(self, data):
+        self.region_id = str(data.get("region_id"))
+        self.name = data.get("region_name")
 
 
 class HostsModel(Model):
@@ -30,18 +53,93 @@ class HostsModel(Model):
         return self.db
 
     def get_setup_tables(self):
-        return ["hosts"]
+        return ["hosts", "regions"]
 
     @coroutine
-    def new_host(self, name, internal_location, default):
+    def new_region(self, name):
+        try:
+            region_id = yield self.db.insert(
+                """
+                INSERT INTO `regions`
+                (`region_name`)
+                VALUES (%s);
+                """, name
+            )
+        except common.database.DatabaseError as e:
+            raise RegionError("Failed to create a region: " + e.args[1])
+        else:
+            raise Return(region_id)
+
+    @coroutine
+    def get_region(self, region_id):
+        try:
+            region = yield self.db.get(
+                """
+                SELECT *
+                FROM `regions`
+                WHERE `region_id`=%s
+                LIMIT 1;
+                """, region_id
+            )
+        except common.database.DatabaseError as e:
+            raise RegionError("Failed to get region: " + e.args[1])
+
+        if region is None:
+            raise RegionNotFound()
+
+        raise Return(RegionAdapter(region))
+
+    @coroutine
+    def list_regions(self):
+        try:
+            regions = yield self.db.query(
+                """
+                SELECT *
+                FROM `regions`;
+                """
+            )
+        except common.database.DatabaseError as e:
+            raise RegionError("Failed to list regions: " + e.args[1])
+
+        raise Return(map(RegionAdapter, regions))
+
+    @coroutine
+    def update_region(self, region_id, name):
+        try:
+            yield self.db.execute(
+                """
+                UPDATE `regions`
+                SET `region_name`=%s
+                WHERE `region_id`=%s;
+                """, name, region_id
+            )
+        except common.database.DatabaseError as e:
+            raise RegionError("Failed to update region: " + e.args[1])
+
+    @coroutine
+    def delete_region(self, region_id):
+        try:
+            yield self.db.execute(
+                """
+                DELETE FROM `regions`
+                WHERE `region_id`=%s
+                """, region_id
+            )
+        except common.database.ConstraintsError:
+            raise RegionError("Dependent host exists")
+        except common.database.DatabaseError as e:
+            raise RegionError("Failed to delete a region: " + e.args[1])
+
+    @coroutine
+    def new_host(self, name, internal_location, region, default, enabled=True):
 
         try:
             host_id = yield self.db.insert(
                 """
                 INSERT INTO `hosts`
-                (`host_name`, `internal_location`, `geo_location`, `host_default`, `host_enabled`)
-                VALUES (%s, %s, point(0, 0), %s, %s)
-                """, name, internal_location, int(bool(default)), 0
+                (`host_name`, `internal_location`, `geo_location`, `host_region`, `host_default`,  `host_enabled`)
+                VALUES (%s, %s, point(0, 0), %s, %s, %s)
+                """, name, internal_location, region, int(bool(default)), int(bool(enabled))
             )
         except common.database.DatabaseError as e:
             raise HostError("Failed to create a host: " + e.args[1])
@@ -49,14 +147,14 @@ class HostsModel(Model):
             raise Return(host_id)
 
     @coroutine
-    def update_host(self, host_id, name, internal_location, default, enabled):
+    def update_host(self, host_id, name, internal_location, region, default, enabled):
         try:
             yield self.db.execute(
                 """
                 UPDATE `hosts`
-                SET `host_name`=%s, `internal_location`=%s, `host_default`=%s, `host_enabled`=%s
+                SET `host_name`=%s, `internal_location`=%s, `host_region`=%s, `host_default`=%s, `host_enabled`=%s
                 WHERE `host_id`=%s
-                """, name, internal_location, int(bool(default)), int(bool(enabled)), host_id
+                """, name, internal_location, region, int(bool(default)), int(bool(enabled)), host_id
             )
         except common.database.DatabaseError as e:
             raise HostError("Failed to update host: " + e.args[1])

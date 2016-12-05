@@ -60,8 +60,9 @@ class RoomQuery(object):
 
         self.room_id = None
         self.host_id = None
+        self.region_id = None
         self.state = None
-        self.ignore_full = False
+        self.show_full = True
         self.hosts_order = None
         self.limit = 0
         self.other_conditions = []
@@ -97,12 +98,16 @@ class RoomQuery(object):
             conditions.append("`state`=%s")
             data.append(self.state)
 
-        if self.ignore_full:
+        if not self.show_full:
             conditions.append("`players`<`max_players`")
 
         if self.host_id:
             conditions.append("`host_id`=%s")
             data.append(str(self.host_id))
+
+        if self.region_id:
+            conditions.append("`region_id`=%s")
+            data.append(str(self.region_id))
 
         if self.room_id:
             conditions.append("`room_id`=%s")
@@ -307,7 +312,7 @@ class RoomsModel(Model):
 
     @coroutine
     def create_and_join_room(self, gamespace, game_name, game_version, gs, room_settings,
-                             account_id, access_token, host_id, deployment_id, trigger_remove=True):
+                             account_id, access_token, host, deployment_id, trigger_remove=True):
 
         max_players = gs.max_players
 
@@ -318,10 +323,10 @@ class RoomsModel(Model):
                 """
                 INSERT INTO `rooms`
                 (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
-                  `max_players`, `location`, `settings`, `state`, `host_id`, `deployment_id`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE', %s, %s)
+                  `max_players`, `location`, `settings`, `state`, `host_id`, `region_id`, `deployment_id`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE', %s, %s, %s)
                 """, gamespace, game_name, game_version, gs.game_server_id, 1, max_players,
-                "{}", ujson.dumps(room_settings), host_id, deployment_id
+                "{}", ujson.dumps(room_settings), host.host_id, host.region, deployment_id
             )
 
             record_id = yield self.__insert_player__(gamespace, account_id, room_id, key, access_token, self.db,
@@ -334,7 +339,7 @@ class RoomsModel(Model):
     @coroutine
     def find_and_join_room(self, gamespace, game_name, game_version, game_server_id,
                            account_id, access_token, settings,
-                           hosts_order=None, my_region_only=None):
+                           hosts_order=None, region=None):
 
         """
         Find the room and join into it, if any
@@ -347,7 +352,7 @@ class RoomsModel(Model):
         :param settings: room specific filters, defined like so:
                 {"filterA": 5, "filterB": true, "filterC": {"@func": ">", "@value": 10}}
         :param hosts_order: a list of host id's to order result around
-        :param my_region_only: an id of the region the search should be locked around
+        :param region: an id of the region the search should be locked around
         :returns a pair of record_id, a key (an unique string to find the record by) for the player and room info
         """
         try:
@@ -364,6 +369,7 @@ class RoomsModel(Model):
                 query.hosts_order = hosts_order
                 query.for_update = True
                 query.ignore_full = True
+                query.region_id = region
 
                 text, data = query.query()
 
@@ -568,7 +574,7 @@ class RoomsModel(Model):
 
     @coroutine
     def list_rooms(self, gamespace, game_name, game_version, game_server_id, settings,
-                   hosts_order=None, ignore_full=True, my_host_only=None):
+                   hosts_order=None, show_full=True, region=None, host=None):
 
         try:
             conditions = common.database.format_conditions_json('settings', settings)
@@ -580,9 +586,10 @@ class RoomsModel(Model):
 
             query.add_conditions(conditions)
             query.hosts_order = hosts_order
-            query.ignore_full = ignore_full
+            query.show_full = show_full
             query.state = 'SPAWNED'
-            query.host_id = my_host_only
+            query.host_id = host
+            query.region_id = region
 
             text, data = query.query()
 

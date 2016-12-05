@@ -204,10 +204,10 @@ class RoomsHandler(AuthenticatedHandler):
 
         rooms_data = self.application.rooms
         hosts = self.application.hosts
-        my_host_only = None
+        my_region_only = None
         ordered_hosts = None
 
-        ignore_full = self.get_argument("ignore_full", "false") == "true"
+        show_full = self.get_argument("show_full", "true") == "true"
         lock_my_region = self.get_argument("my_region_only", "false") == "true"
 
         if geo:
@@ -215,11 +215,13 @@ class RoomsHandler(AuthenticatedHandler):
 
             if lock_my_region:
                 try:
-                    my_host_only = yield hosts.get_closest_host(x, y)
+                    my_host = yield hosts.get_closest_host(x, y)
                 except HostNotFound:
                     pass
+                else:
+                    my_region_only = my_host.region
 
-            if not my_host_only:
+            if not my_region_only:
                 closest_hosts = yield hosts.list_closest_hosts(x, y)
                 ordered_hosts = [host.host_id for host in closest_hosts]
         else:
@@ -229,8 +231,8 @@ class RoomsHandler(AuthenticatedHandler):
             gamespace, game_name, game_version,
             game_server_id, settings,
             hosts_order=ordered_hosts,
-            ignore_full=ignore_full,
-            my_host_only=my_host_only)
+            show_full=show_full,
+            region=my_region_only)
 
         self.dumps({
             "rooms": [

@@ -2,7 +2,10 @@
 from tornado.gen import coroutine, Return, sleep
 
 import tornado.ioloop
+
 from room import RoomNotFound, RoomError
+from host import HostNotFound
+
 from gameserver import GameVersionNotFound
 from deploy import NoCurrentDeployment
 import logging
@@ -116,12 +119,15 @@ class Player(object):
         except RateLimitExceeded:
             raise PlayerError(429, "Too many requests")
         else:
-            host = yield self.get_closest_host()
+            try:
+                host = yield self.get_closest_host()
+            except HostNotFound:
+                raise PlayerError(404, "Host not found")
 
             self.record_id, key, self.room_id = yield self.rooms.create_and_join_room(
                 self.gamespace, self.game_name, self.game_version,
                 self.gs, room_settings, self.account_id, self.access_token,
-                host.host_id, deployment_id, False)
+                host, deployment_id, False)
 
             logging.info("Created a room: '{0}'".format(self.room_id))
 
@@ -184,7 +190,12 @@ class Player(object):
             x, y = geo
 
             if lock_my_region:
-                my_region_only = yield self.hosts.get_closest_host(x, y)
+                try:
+                    my_host = yield self.hosts.get_closest_host(x, y)
+                except HostNotFound:
+                    pass
+                else:
+                    my_region_only = my_host.region
 
             if not my_region_only:
                 hosts = yield self.hosts.list_closest_hosts(x, y)
@@ -196,7 +207,7 @@ class Player(object):
                 self.account_id, self.access_token, search_settings,
 
                 hosts_order=hosts_order,
-                my_region_only=my_region_only)
+                region=my_region_only)
 
         except RoomNotFound as e:
             if auto_create:

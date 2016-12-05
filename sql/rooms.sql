@@ -10,11 +10,14 @@ CREATE TABLE `rooms` (
   `location` json NOT NULL,
   `state` enum('NONE','SPAWNED') NOT NULL DEFAULT 'NONE',
   `host_id` int(10) unsigned NOT NULL,
+  `region_id` int(10) NOT NULL,
   `deployment_id` int(11) NOT NULL,
   PRIMARY KEY (`room_id`),
   KEY `game_server_id` (`game_server_id`),
   KEY `host_id` (`host_id`),
   KEY `deployment_id` (`deployment_id`),
+  KEY `region_id` (`region_id`),
   CONSTRAINT `rooms_ibfk_1` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`host_id`),
-  CONSTRAINT `rooms_ibfk_2` FOREIGN KEY (`deployment_id`) REFERENCES `deployments` (`deployment_id`)
+  CONSTRAINT `rooms_ibfk_2` FOREIGN KEY (`deployment_id`) REFERENCES `deployments` (`deployment_id`),
+  CONSTRAINT `rooms_ibfk_3` FOREIGN KEY (`region_id`) REFERENCES `regions` (`region_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

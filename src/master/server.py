@@ -74,6 +74,9 @@ class GameMasterServer(common.server.Server):
             "debug_host": admin.DebugHostController,
             "new_host": admin.NewHostController,
 
+            "region": admin.RegionController,
+            "new_region": admin.NewRegionController,
+
             "bans": admin.BansController,
             "new_ban": admin.IssueBanController,
             "find_ban": admin.FindBanController,

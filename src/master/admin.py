@@ -7,7 +7,7 @@ import common.admin as a
 from common.environment import AppNotFound
 
 from model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
-from model.host import HostNotFound, HostError
+from model.host import HostNotFound, HostError, RegionNotFound, RegionError
 from model.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
 from model.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
 from model.ban import NoSuchBan, BanError, UserAlreadyBanned
@@ -1138,22 +1138,48 @@ class DebugHostController(a.AdminController):
 
 class NewHostController(a.AdminController):
     @coroutine
-    def create(self, name, internal_location, host_default="false"):
+    def create(self, name, internal_location, region, host_default="false"):
         hosts = self.application.hosts
-        host_id = yield hosts.new_host(name, internal_location, host_default == "true")
+
+        if not region:
+            raise a.ActionError("Please define a region for a host")
+
+        try:
+            host_id = yield hosts.new_host(name, internal_location, region, host_default == "true")
+        except HostError as e:
+            raise a.ActionError("Failed to create new host: " + e.message)
 
         raise a.Redirect(
             "host",
             message="New host has been created",
             host_id=host_id)
 
+    @coroutine
+    def get(self):
+        hosts = self.application.hosts
+        try:
+            regions = yield hosts.list_regions()
+        except RegionError as e:
+            raise a.ActionError("Failed to list regions: " + e.message)
+
+        raise a.Return({
+            "regions": {
+                region.region_id: region.name
+                for region in regions
+            }
+        })
+
     def render(self, data):
         return [
+            a.breadcrumbs([
+                a.link("hosts", "Hosts")
+            ], "New host"),
             a.form("New host", fields={
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty",
-                                             order=2),
-                "host_default": a.field("Is Default?", "switch", "primary", "non-empty", order=3),
+                "region": a.field("Host region", "select", "primary", "non-empty", order=2, values=data["regions"]),
+                "internal_location":
+                    a.field("Internal location (including scheme)", "text", "primary", "non-empty", order=3),
+                "host_default": a.field("Is Default?", "switch", "primary", "non-empty", order=4),
             }, methods={
                 "create": a.method("Create", "primary")
             }, data=data),
@@ -1195,14 +1221,28 @@ class HostController(a.AdminController):
     @coroutine
     def get(self, host_id):
         hosts = self.application.hosts
-        host = yield hosts.get_host(host_id)
+
+        try:
+            host = yield hosts.get_host(host_id)
+        except HostNotFound:
+            raise a.ActionError("No such host")
+
+        try:
+            regions = yield hosts.list_regions()
+        except RegionError as e:
+            raise a.ActionError("Failed to list regions: " + e.message)
 
         result = {
             "name": host.name,
             "internal_location": host.internal_location,
             "geo_location": str(host.geo_location),
             "host_default": "true" if host.default else "false",
-            "host_enabled": "true" if host.enabled else "false"
+            "host_enabled": "true" if host.enabled else "false",
+            "region": host.region,
+            "regions": {
+                region.region_id: region.name
+                for region in regions
+            }
         }
 
         raise a.Return(result)
@@ -1218,10 +1258,11 @@ class HostController(a.AdminController):
             a.form("Host '{0}' information".format(data["name"]), fields={
                 "host_enabled": a.field("Enabled (can accept players)", "switch", "primary", order=0),
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
+                "region": a.field("Host region", "select", "primary", "non-empty", order=2, values=data["regions"]),
                 "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty",
-                                             order=2),
-                "geo_location": a.field("Geo location", "readonly", "primary", order=3),
-                "host_default": a.field("Is default?", "switch", "primary", order=4),
+                                             order=3),
+                "geo_location": a.field("Geo location", "readonly", "primary", order=4),
+                "host_default": a.field("Is default?", "switch", "primary", order=5),
             }, methods={
                 "update": a.method("Update", "primary", order=1),
                 "delete": a.method("Delete", "danger", order=2)
@@ -1241,16 +1282,23 @@ class HostController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def update(self, name, internal_location, host_default="false", host_enabled="false"):
+    def update(self, name, internal_location, region, host_default="false", host_enabled="false"):
         host_id = self.context.get("host_id")
         hosts = self.application.hosts
 
-        yield hosts.update_host(
-            host_id,
-            name,
-            internal_location,
-            host_default == "true",
-            host_enabled == "true")
+        if not region:
+            raise a.ActionError("Region is not defined")
+
+        try:
+            yield hosts.update_host(
+                host_id,
+                name,
+                internal_location,
+                region,
+                host_default == "true",
+                host_enabled == "true")
+        except HostError as e:
+            raise a.ActionError("Failed to update host: " + e.message)
 
         raise a.Redirect("host",
                          message="Host has been updated",
@@ -1289,10 +1337,18 @@ class HostsController(a.AdminController):
     @coroutine
     def get(self):
         hosts = self.application.hosts
-        hosts_list = yield hosts.list_hosts()
+
+        try:
+            hosts_list = yield hosts.list_hosts()
+            regions_list = yield hosts.list_regions()
+        except HostError as e:
+            raise a.ActionError("Failed to fetch hosts: " + e.message)
+        except RegionError as e:
+            raise a.ActionError("Failed to fetch regions: " + e.message)
 
         result = {
-            "hosts": hosts_list
+            "hosts": hosts_list,
+            "regions": regions_list
         }
 
         raise a.Return(result)
@@ -1304,9 +1360,14 @@ class HostsController(a.AdminController):
                 a.link("host", host.name, icon="server", host_id=host.host_id)
                 for host in data["hosts"]
                 ]),
+            a.links("Regions", links=[
+                a.link("region", region.name, icon="globe", region_id=region.region_id)
+                for region in data["regions"]
+                ]),
             a.links("Navigate", [
                 a.link("index", "Go back"),
-                a.link("new_host", "New host", "plus")
+                a.link("new_host", "New host", "plus"),
+                a.link("new_region", "New region", "plus")
             ])
         ]
 
@@ -1527,3 +1588,101 @@ class BanController(a.AdminController):
         raise a.Redirect(
             "bans",
             message="Ban has been deleted")
+
+
+class RegionController(a.AdminController):
+    @coroutine
+    def delete(self, *args, **kwargs):
+        region_id = self.context.get("region_id")
+        hosts = self.application.hosts
+
+        try:
+            yield hosts.delete_region(region_id)
+        except RegionError as e:
+            raise a.ActionError("Failed to delete region: " + e.message)
+
+        raise a.Redirect(
+            "hosts",
+            message="Region has been deleted")
+
+    @coroutine
+    def get(self, region_id):
+        hosts = self.application.hosts
+        region = yield hosts.get_region(region_id)
+
+        result = {
+            "name": region.name
+        }
+
+        raise a.Return(result)
+
+    def render(self, data):
+        return [
+            a.breadcrumbs([
+                a.link("hosts", "Hosts"),
+                a.link("hosts", "Regions"),
+            ], data["name"]),
+            a.form("Region '{0}' information".format(data["name"]), fields={
+                "name": a.field("Region name", "text", "primary", "non-empty", order=1)
+            }, methods={
+                "update": a.method("Update", "primary", order=1),
+                "delete": a.method("Delete", "danger", order=2)
+            }, data=data),
+            a.links("Navigate", [
+                a.link("hosts", "Go back")
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]
+
+    @coroutine
+    def update(self, name):
+        region_id = self.context.get("region_id")
+        hosts = self.application.hosts
+
+        try:
+            yield hosts.update_region(
+                region_id,
+                name)
+        except RegionError as e:
+            raise a.ActionError("Failed to update region: " + e.message)
+
+        raise a.Redirect("region",
+                         message="Region has been updated",
+                         region_id=region_id)
+
+
+class NewRegionController(a.AdminController):
+    @coroutine
+    def create(self, name):
+        hosts = self.application.hosts
+
+        try:
+            region_id = yield hosts.new_region(name)
+        except RegionError as e:
+            raise a.ActionError("Failed to create new region: " + e.message)
+
+        raise a.Redirect(
+            "region",
+            message="New region has been created",
+            region_id=region_id)
+
+    def render(self, data):
+        return [
+            a.breadcrumbs([
+                a.link("hosts", "Hosts"),
+                a.link("hosts", "Regions"),
+            ], "New region"),
+            a.form("New region", fields={
+                "name": a.field("Region name", "text", "primary", "non-empty", order=1)
+            }, methods={
+                "create": a.method("Create", "primary")
+            }, data=data),
+            a.links("Navigate", [
+                a.link("@back", "Go back")
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]
