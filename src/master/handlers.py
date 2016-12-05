@@ -7,10 +7,10 @@ from tornado.web import HTTPError
 from common.access import scoped, internal, AccessToken, remote_ip
 from common.handler import AuthenticatedHandler
 
-from data.host import HostNotFound
-from data.controller import ControllerError
-from data.player import Player, RoomNotFound, PlayerError, RoomError, PlayerBanned
-from data.gameserver import GameServerNotFound
+from model.host import HostNotFound
+from model.controller import ControllerError
+from model.player import Player, RoomNotFound, PlayerError, RoomError, PlayerBanned
+from model.gameserver import GameServerNotFound
 from common.internal import InternalError
 
 import logging

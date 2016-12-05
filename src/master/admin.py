@@ -6,11 +6,11 @@ import tornado.httpclient
 import common.admin as a
 from common.environment import AppNotFound
 
-from data.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
-from data.host import HostNotFound, HostError
-from data.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
-from data.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
-from data.ban import NoSuchBan, BanError, UserAlreadyBanned
+from model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
+from model.host import HostNotFound, HostError
+from model.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
+from model.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
+from model.ban import NoSuchBan, BanError, UserAlreadyBanned
 
 from tornado.concurrent import run_on_executor
 from concurrent.futures import ThreadPoolExecutor

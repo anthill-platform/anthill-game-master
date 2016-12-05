@@ -12,12 +12,12 @@ import common.server
 import common.sign
 import common.ratelimit
 
-from data.gameserver import GameServersModel
-from data.room import RoomsModel
-from data.controller import ControllersClientModel
-from data.host import HostsModel
-from data.deploy import DeploymentModel
-from data.ban import BansModel
+from model.gameserver import GameServersModel
+from model.room import RoomsModel
+from model.controller import ControllersClientModel
+from model.host import HostsModel
+from model.deploy import DeploymentModel
+from model.ban import BansModel
 
 import options as _opts
 

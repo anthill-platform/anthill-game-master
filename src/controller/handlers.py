@@ -6,8 +6,8 @@ from common.internal import InternalError
 from common.access import internal
 from common.handler import AuthenticatedHandler
 
-from data.server import SpawnError
-from data.delivery import DeliveryError
+from model.server import SpawnError
+from model.delivery import DeliveryError
 
 import ujson
 

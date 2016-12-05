@@ -6,9 +6,9 @@ import common.access
 import common.sign
 import handlers as h
 
-from data.servers import GameServersData
-from data.room import RoomsData
-from data.delivery import DeliveryModel
+from model.servers import GameServersData
+from model.room import RoomsData
+from model.delivery import DeliveryModel
 
 import admin
 import options as _opts
