@@ -368,7 +368,7 @@ class RoomsModel(Model):
                 query.add_conditions(conditions)
                 query.hosts_order = hosts_order
                 query.for_update = True
-                query.ignore_full = True
+                query.show_full = False
                 query.region_id = region
 
                 text, data = query.query()
@@ -409,7 +409,7 @@ class RoomsModel(Model):
 
                 query.room_id = room_id
                 query.for_update = True
-                query.ignore_full = True
+                query.show_full = False
 
                 text, data = query.query()
 
