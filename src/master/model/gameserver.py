@@ -35,6 +35,7 @@ class GameServerAdapter(object):
         self.schema = data.get("schema", GameServersModel.DEFAULT_SERVER_SCHEME)
         self.max_players = data.get("max_players", 8)
         self.game_settings = data.get("game_settings", {})
+        self.game_settings["max_players"] = self.max_players
         self.server_settings = data.get("server_settings", {})
 
 
