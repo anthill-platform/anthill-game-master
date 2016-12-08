@@ -38,10 +38,14 @@ class ControllersClientModel(object):
                     raise ControllerError("Failed to extend token: {0} {1}".format(str(e.code), e.message))
                 else:
                     access_token = extend["access_token"]
+                    scopes = extend["scopes"]
+            else:
+                raise ControllerError("No token and/or tokens passed")
 
             # if everything is ok, return the token
             raise Return({
-                "access_token": access_token
+                "access_token": access_token,
+                "scopes": scopes
             })
 
     @coroutine
