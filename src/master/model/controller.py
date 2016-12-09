@@ -3,6 +3,7 @@ from tornado.gen import coroutine, Return
 
 import logging
 from common.internal import Internal, InternalError
+from common.access import AccessToken
 
 from room import ApproveFailed, RoomError
 
@@ -38,14 +39,13 @@ class ControllersClientModel(object):
                     raise ControllerError("Failed to extend token: {0} {1}".format(str(e.code), e.message))
                 else:
                     access_token = extend["access_token"]
-                    scopes = extend["scopes"]
-            else:
-                raise ControllerError("No token and/or tokens passed")
+
+            parsed = AccessToken(access_token)
 
             # if everything is ok, return the token
             raise Return({
                 "access_token": access_token,
-                "scopes": scopes
+                "scopes": parsed.scopes if parsed.is_valid() else []
             })
 
     @coroutine
