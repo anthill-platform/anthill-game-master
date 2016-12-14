@@ -134,7 +134,7 @@ class RoomQuery(object):
                     SELECT `hosts`.`host_state`
                     FROM `hosts`
                     WHERE `hosts`.`host_id` = `rooms`.`room_id`
-                ) = 'ACTIVE'
+                ) IN ('ACTIVE', 'OVERLOAD')
             """)
 
         for condition, values in self.other_conditions:

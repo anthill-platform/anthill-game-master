@@ -266,7 +266,7 @@ class HostsModel(Model):
             raise HostError("Failed to update host: " + e.args[1])
 
     @coroutine
-    def update_host_load(self, host_id, memory, cpu, db=None):
+    def update_host_load(self, host_id, memory, cpu, state='ACTIVE', db=None):
 
         total_load = max(memory, cpu) / 100.0
 
@@ -274,11 +274,11 @@ class HostsModel(Model):
             yield (db or self.db).execute(
                 """
                 UPDATE `hosts`
-                SET `host_load`=%s, `host_memory`=%s, `host_cpu`=%s, `host_state`='ACTIVE',
+                SET `host_load`=%s, `host_memory`=%s, `host_cpu`=%s, `host_state`=%s,
                     `host_heartbeat`=NOW(),
                     `host_processing`=0
                 WHERE `host_id`=%s
-                """, total_load, memory, cpu, host_id)
+                """, total_load, memory, cpu, state, host_id)
         except common.database.DatabaseError as e:
             raise HostError("Failed to update host load: " + e.args[1])
 
@@ -333,7 +333,6 @@ class HostsModel(Model):
             raise HostError("Failed to get hosts: " + e.args[1])
 
         raise Return(map(HostAdapter, hosts))
-
 
     @coroutine
     def list_hosts(self, region_id=None):

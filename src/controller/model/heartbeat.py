@@ -1,6 +1,4 @@
 
-from tornado.gen import coroutine, Return
-
 from psutil import virtual_memory, cpu_percent
 from common.model import Model
 
@@ -15,7 +13,7 @@ class HeartbeatModel(Model):
 
     def report(self):
         m = virtual_memory()
-        memory_load = int(float(m.available) / float(m.total) * 100)
+        memory_load = int((1.0 - float(m.free) / float(m.total)) * 100)
         cpu_load = int(cpu_percent())
 
         rooms = self.__rooms_report__()

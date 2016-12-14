@@ -9,7 +9,7 @@ CREATE TABLE `hosts` (
   `host_memory` float NOT NULL DEFAULT '0',
   `host_cpu` float NOT NULL DEFAULT '0',
   `host_processing` tinyint(1) NOT NULL DEFAULT '0',
-  `host_state` enum('ACTIVE','ERROR') NOT NULL DEFAULT 'ERROR',
+  `host_state` enum('ACTIVE','ERROR','OVERLOAD') NOT NULL DEFAULT 'ERROR',
   PRIMARY KEY (`host_id`),
   KEY `host_region` (`host_region`),
   CONSTRAINT `hosts_ibfk_1` FOREIGN KEY (`host_region`) REFERENCES `regions` (`region_id`)

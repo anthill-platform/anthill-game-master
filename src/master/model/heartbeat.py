@@ -5,6 +5,7 @@ from tornado.gen import coroutine, Return
 from common.model import Model
 from common.options import options
 from common.internal import Internal, InternalError
+from common import to_int
 
 from host import HostAdapter
 
@@ -16,8 +17,8 @@ class HeartbeatReport(object):
 
         load = data.get("load", {})
 
-        self.memory = load.get("memory", 999)
-        self.cpu = load.get("cpu", 999)
+        self.memory = to_int(load.get("memory", 999))
+        self.cpu = to_int(load.get("cpu", 999))
         self.rooms = data.get("rooms", [])
 
 
@@ -26,6 +27,9 @@ class HeartbeatError(Exception):
 
 
 class HeartbeatModel(Model):
+
+    MEMORY_OVERLOAD = 95
+
     def __init__(self, app, db):
 
         self.app = app
@@ -100,8 +104,13 @@ class HeartbeatModel(Model):
                     except HeartbeatError:
                         failed.append(host.host_id)
                     else:
+                        if report.memory > HeartbeatModel.MEMORY_OVERLOAD:
+                            state = 'OVERLOAD'
+                        else:
+                            state = 'ACTIVE'
+
                         # update load in case of success
-                        yield self.app.hosts.update_host_load(host.host_id, report.memory, report.cpu, db=db)
+                        yield self.app.hosts.update_host_load(host.host_id, report.memory, report.cpu, state, db=db)
 
                         # delete rooms not listed in that list
                         yield self.app.rooms.remove_host_rooms(host.host_id, except_rooms=report.rooms)
