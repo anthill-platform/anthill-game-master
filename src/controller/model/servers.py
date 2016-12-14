@@ -11,7 +11,7 @@ import random
 import datetime
 
 
-class GameServersData(Model):
+class GameServersModel(Model):
 
     DEPLOYMENTS = "deployments"
     RUNTIME = "runtime"
@@ -28,11 +28,15 @@ class GameServersData(Model):
 
         self.pool = PortsPool(ports_pool_from, ports_pool_to)
         self.servers = {}
+        self.servers_rooms = {}
         self.sub = common.events.Subscriber(self)
         self.pub = common.events.Publisher()
 
     def get_server(self, name):
         return self.servers.get(name, None)
+
+    def get_server_by_room(self, room_id):
+        return self.servers_rooms.get(room_id)
 
     def get_servers(self):
         return self.servers
@@ -54,6 +58,7 @@ class GameServersData(Model):
     def instantiate(self, name, game_id, game_version, game_server_name, deployment, room):
         gs = server.GameServer(self, game_id, game_version, game_server_name, deployment, name, room)
         self.servers[name] = gs
+        self.servers_rooms[room.id()] = gs
 
         self.sub.subscribe(gs.pub, ["server_updated"])
         self.pub.notify("new_server", server=gs)
@@ -84,7 +89,7 @@ class GameServersData(Model):
 
         instance = yield self.instantiate(name, game_name, game_version, game_server_name, deployment, room)
 
-        app_path = os.path.join(self.binaries_path, GameServersData.RUNTIME, game_name, game_version, deployment)
+        app_path = os.path.join(self.binaries_path, GameServersModel.RUNTIME, game_name, game_version, deployment)
         
         sock_name = str(os.getpid()) + "_" + name
         sock_path = os.path.join(self.sock_path, sock_name)
@@ -116,13 +121,14 @@ class GameServersData(Model):
         self.pub.notify("server_removed", server=instance)
 
         def remove_server():
-            self.servers.pop(instance.name)
+            s = self.servers.pop(instance.name)
+            self.servers_rooms.pop(s.room.id())
 
         tornado.ioloop.IOLoop.current().add_timeout(datetime.timedelta(minutes=10), remove_server)
 
     @coroutine
     def terminate_all(self, kill=False):
-        yield [s.terminate(kill=kill) for s in self.servers]
+        yield [s.terminate(kill=kill) for name, s in self.servers.iteritems()]
 
     @coroutine
     def stopped(self):

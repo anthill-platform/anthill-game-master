@@ -83,6 +83,12 @@ class RoomsData(object):
             logging.info("Room deleted: " + str(room_id))
             del self.rooms[room_id]
 
+    def list(self):
+        return self.rooms.iteritems()
+
+    def get(self, room_id):
+        return self.rooms.get(room_id)
+
     def new(self, gamespace, room_id, settings):
         logging.info("New room: " + str(room_id))
 

@@ -105,3 +105,8 @@ define("deployments_location",
        default="/opt/local/deployments",
        help="A limit for room creation for user tuple: (amount, time)",
        type=str)
+
+define("heartbeat_time",
+       default=30,
+       help="Heartbeat periods (how ofter to check controllers)",
+       type=int)

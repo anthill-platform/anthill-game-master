@@ -20,7 +20,7 @@ define("listen",
 
 define("name",
        default="game-ctl",
-       help="Service short name. User to discover by discovery service.",
+       help="Service short name. Used to discover by discovery service.",
        type=str)
 
 # Game servers

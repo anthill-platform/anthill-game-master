@@ -18,6 +18,7 @@ from model.controller import ControllersClientModel
 from model.host import HostsModel
 from model.deploy import DeploymentModel
 from model.ban import BansModel
+from model.heartbeat import HeartbeatModel
 
 import options as _opts
 
@@ -42,10 +43,11 @@ class GameMasterServer(common.server.Server):
         self.env_service = common.environment.EnvironmentClient(self.cache)
 
         self.gameservers = GameServersModel(self.db)
-        self.rooms = RoomsModel(self.db)
         self.hosts = HostsModel(self.db)
+        self.rooms = RoomsModel(self.db, self.hosts)
         self.deployments = DeploymentModel(self.db)
         self.bans = BansModel(self.db)
+        self.heartbeat = HeartbeatModel(self, self.db)
 
         self.ctl_client = ControllersClientModel(self.rooms)
 
@@ -54,7 +56,7 @@ class GameMasterServer(common.server.Server):
         })
 
     def get_models(self):
-        return [self.hosts, self.rooms, self.gameservers, self.deployments, self.bans]
+        return [self.hosts, self.rooms, self.gameservers, self.deployments, self.bans, self.heartbeat]
 
     def get_admin(self):
         return {
@@ -64,16 +66,18 @@ class GameMasterServer(common.server.Server):
             "app_version": admin.ApplicationVersionController,
             "deploy": admin.DeployApplicationController,
             "deployment": admin.ApplicationDeploymentController,
+            "rooms": admin.RoomsController,
+            "room": admin.RoomController,
 
             "game_server": admin.GameServerController,
             "new_game_server": admin.NewGameServerController,
             "game_server_version": admin.GameServerVersionController,
 
-            "hosts": admin.HostsController,
             "host": admin.HostController,
             "debug_host": admin.DebugHostController,
             "new_host": admin.NewHostController,
 
+            "regions": admin.RegionsController,
             "region": admin.RegionController,
             "new_region": admin.NewRegionController,
 

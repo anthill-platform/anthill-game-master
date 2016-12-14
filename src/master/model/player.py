@@ -4,7 +4,7 @@ from tornado.gen import coroutine, Return, sleep
 import tornado.ioloop
 
 from room import RoomNotFound, RoomError
-from host import HostNotFound
+from host import HostNotFound, RegionNotFound
 
 from gameserver import GameVersionNotFound
 from deploy import NoCurrentDeployment
@@ -69,17 +69,17 @@ class Player(object):
             raise PlayerBanned(ban)
 
     @coroutine
-    def get_closest_host(self):
+    def get_closest_region(self):
 
         location = self.get_location()
 
         if location:
             x, y = location
-            host = yield self.hosts.get_closest_host(x, y)
+            region = yield self.hosts.get_closest_region(x, y)
         else:
-            host = yield self.hosts.get_default_host()
+            region = yield self.hosts.get_default_region()
 
-        raise Return(host)
+        raise Return(region)
 
     def get_location(self):
         if not self.ip:
@@ -91,6 +91,11 @@ class Player(object):
             return None
 
         return geo.location
+
+    @coroutine
+    def get_best_host(self, region):
+        host = yield self.hosts.get_best_host(region.region_id)
+        raise Return(host)
 
     @coroutine
     def create(self, room_settings):
@@ -120,9 +125,14 @@ class Player(object):
             raise PlayerError(429, "Too many requests")
         else:
             try:
-                host = yield self.get_closest_host()
-            except HostNotFound:
+                region = yield self.get_closest_region()
+            except RegionNotFound:
                 raise PlayerError(404, "Host not found")
+
+            try:
+                host = yield self.get_best_host(region)
+            except HostNotFound:
+                raise PlayerError(503, "Not enough hosts")
 
             self.record_id, key, self.room_id = yield self.rooms.create_and_join_room(
                 self.gamespace, self.game_name, self.game_version,
@@ -181,7 +191,7 @@ class Player(object):
         :param lock_my_region: should be search applied to the player's region only
         """
 
-        hosts_order = None
+        regions_order = None
 
         geo = self.get_location()
         my_region_only = None
@@ -191,22 +201,20 @@ class Player(object):
 
             if lock_my_region:
                 try:
-                    my_host = yield self.hosts.get_closest_host(x, y)
-                except HostNotFound:
+                    my_region_only = yield self.hosts.get_closest_region(x, y)
+                except RegionNotFound:
                     pass
-                else:
-                    my_region_only = my_host.region
 
             if not my_region_only:
-                hosts = yield self.hosts.list_closest_hosts(x, y)
-                hosts_order = [host.host_id for host in hosts]
+                regions = yield self.hosts.list_closest_regions(x, y)
+                regions_order = [region.region_id for region in regions]
 
         try:
             self.record_id, key, self.room = yield self.rooms.find_and_join_room(
                 self.gamespace, self.game_name, self.game_version, self.gs.game_server_id,
                 self.account_id, self.access_token, search_settings,
 
-                hosts_order=hosts_order,
+                regions_order=regions_order,
                 region=my_region_only)
 
         except RoomNotFound as e:

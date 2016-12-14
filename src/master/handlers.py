@@ -7,7 +7,7 @@ from tornado.web import HTTPError
 from common.access import scoped, internal, AccessToken, remote_ip
 from common.handler import AuthenticatedHandler
 
-from model.host import HostNotFound
+from model.host import RegionNotFound, HostNotFound, HostError
 from model.controller import ControllerError
 from model.player import Player, RoomNotFound, PlayerError, RoomError, PlayerBanned
 from model.gameserver import GameServerNotFound
@@ -21,6 +21,22 @@ from geoip import geolite2
 class InternalHandler(object):
     def __init__(self, application):
         self.application = application
+
+    @coroutine
+    def host_heartbeat(self, name, memory, cpu):
+        logging.info("Host '{0}' load updated: {1} memory {2} cpu".format(name, memory, cpu))
+
+        hosts = self.application.hosts
+
+        try:
+            host = yield hosts.find_host(name)
+        except HostNotFound:
+            raise InternalError(404, "Host not found")
+
+        try:
+            yield hosts.update_host_load(host.host_id, memory, cpu)
+        except HostError as e:
+            raise InternalError(500, str(e))
 
     @coroutine
     def controller_action(self, action, gamespace, room_id, args, kwargs):
@@ -205,7 +221,7 @@ class RoomsHandler(AuthenticatedHandler):
         rooms_data = self.application.rooms
         hosts = self.application.hosts
         my_region_only = None
-        ordered_hosts = None
+        ordered_regions = None
 
         show_full = self.get_argument("show_full", "true") == "true"
         lock_my_region = self.get_argument("my_region_only", "false") == "true"
@@ -215,22 +231,20 @@ class RoomsHandler(AuthenticatedHandler):
 
             if lock_my_region:
                 try:
-                    my_host = yield hosts.get_closest_host(x, y)
-                except HostNotFound:
+                    my_region_only = yield hosts.get_closest_region(x, y)
+                except RegionNotFound:
                     pass
-                else:
-                    my_region_only = my_host.region
 
             if not my_region_only:
-                closest_hosts = yield hosts.list_closest_hosts(x, y)
-                ordered_hosts = [host.host_id for host in closest_hosts]
+                closest_regions = yield hosts.list_closest_regions(x, y)
+                ordered_regions = [region.region_id for region in ordered_regions]
         else:
             ordered_hosts = None
 
         rooms = yield rooms_data.list_rooms(
             gamespace, game_name, game_version,
             game_server_id, settings,
-            hosts_order=ordered_hosts,
+            regions_order=ordered_regions,
             show_full=show_full,
             region=my_region_only)
 

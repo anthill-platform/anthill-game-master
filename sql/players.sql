@@ -3,6 +3,7 @@ CREATE TABLE `players` (
   `gamespace_id` int(11) NOT NULL,
   `account_id` int(11) NOT NULL,
   `room_id` int(11) NOT NULL,
+  `host_id` int(11) NOT NULL,
   `state` enum('RESERVED','JOINED') NOT NULL DEFAULT 'RESERVED',
   `key` varchar(64) NOT NULL DEFAULT '',
   `access_token` mediumtext NOT NULL,

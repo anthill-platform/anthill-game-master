@@ -225,16 +225,26 @@ class DeploymentModel(Model):
         raise Return((map(DeploymentAdapter, deployments), pages))
 
     @coroutine
-    def list_deployments(self, gamespace_id, game_name, game_version):
+    def list_deployments(self, gamespace_id, game_name, game_version=None):
         try:
-            deployments = yield self.db.query(
-                """
-                SELECT *
-                FROM `deployments`
-                WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s
-                ORDER BY `deployment_id` DESC;
-                """, gamespace_id, game_name, game_version
-            )
+            if game_version:
+                deployments = yield self.db.query(
+                    """
+                    SELECT *
+                    FROM `deployments`
+                    WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s
+                    ORDER BY `deployment_id` DESC;
+                    """, gamespace_id, game_name, game_version
+                )
+            else:
+                deployments = yield self.db.query(
+                    """
+                    SELECT *
+                    FROM `deployments`
+                    WHERE `gamespace_id`=%s AND `game_name`=%s
+                    ORDER BY `deployment_id` DESC;
+                    """, gamespace_id, game_name
+                )
         except common.database.DatabaseError as e:
             raise DeploymentError("Failed to get deployment: " + e.args[1])
 

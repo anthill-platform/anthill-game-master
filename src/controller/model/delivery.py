@@ -4,7 +4,7 @@ from tornado.concurrent import run_on_executor
 from concurrent.futures import ThreadPoolExecutor
 
 from common.model import Model
-from servers import GameServersData
+from servers import GameServersModel
 
 import os
 import hashlib
@@ -56,7 +56,7 @@ class Delivery(object):
             ))
 
         runtime_path = os.path.join(
-            self.binaries_path, GameServersData.RUNTIME)
+            self.binaries_path, GameServersModel.RUNTIME)
 
         if not os.path.isdir(runtime_path):
             try:
@@ -66,7 +66,7 @@ class Delivery(object):
                     self.game_name, self.game_version, self.deployment_id, str(e)
                 ))
 
-        app_path = os.path.join(self.binaries_path, GameServersData.RUNTIME, self.game_name)
+        app_path = os.path.join(self.binaries_path, GameServersModel.RUNTIME, self.game_name)
 
         if not os.path.isdir(app_path):
             try:
@@ -76,7 +76,7 @@ class Delivery(object):
                     self.game_name, self.game_version, self.deployment_id, str(e)
                 ))
 
-        version_path = os.path.join(self.binaries_path, GameServersData.RUNTIME, self.game_name, self.game_version)
+        version_path = os.path.join(self.binaries_path, GameServersModel.RUNTIME, self.game_name, self.game_version)
 
         if not os.path.isdir(version_path):
             try:
@@ -87,7 +87,7 @@ class Delivery(object):
                 ))
 
         app_runtime_path = os.path.join(
-            self.binaries_path, GameServersData.RUNTIME, self.game_name, self.game_version,
+            self.binaries_path, GameServersModel.RUNTIME, self.game_name, self.game_version,
             str(self.deployment_id))
 
         if not os.path.isdir(app_runtime_path):
@@ -114,7 +114,7 @@ class Delivery(object):
 
     @coroutine
     def init(self):
-        deployments_path = os.path.join(self.binaries_path, GameServersData.DEPLOYMENTS)
+        deployments_path = os.path.join(self.binaries_path, GameServersModel.DEPLOYMENTS)
 
         if not os.path.isdir(deployments_path):
             try:
@@ -124,7 +124,7 @@ class Delivery(object):
                     self.game_name, self.game_version, self.deployment_id, str(e)
                 ))
 
-        app_path = os.path.join(self.binaries_path, GameServersData.DEPLOYMENTS, self.game_name)
+        app_path = os.path.join(self.binaries_path, GameServersModel.DEPLOYMENTS, self.game_name)
 
         if not os.path.isdir(app_path):
             try:
@@ -134,7 +134,7 @@ class Delivery(object):
                     self.game_name, self.game_version, self.deployment_id, str(e)
                 ))
 
-        version_path = os.path.join(self.binaries_path, GameServersData.DEPLOYMENTS, self.game_name, self.game_version)
+        version_path = os.path.join(self.binaries_path, GameServersModel.DEPLOYMENTS, self.game_name, self.game_version)
 
         if not os.path.isdir(version_path):
             try:
@@ -145,7 +145,7 @@ class Delivery(object):
                 ))
 
         self.deployment_path = os.path.join(
-            self.binaries_path, GameServersData.DEPLOYMENTS, self.game_name, self.game_version,
+            self.binaries_path, GameServersModel.DEPLOYMENTS, self.game_name, self.game_version,
             str(self.deployment_id) + ".zip")
 
         try:

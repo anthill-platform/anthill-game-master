@@ -5,12 +5,14 @@ import tornado.httpclient
 
 import common.admin as a
 from common.environment import AppNotFound
+from common.database import format_conditions_json
 
 from model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
 from model.host import HostNotFound, HostError, RegionNotFound, RegionError
 from model.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
 from model.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
 from model.ban import NoSuchBan, BanError, UserAlreadyBanned
+from model.room import RoomQuery, RoomNotFound, RoomError
 
 from tornado.concurrent import run_on_executor
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +25,7 @@ import zipfile
 import hashlib
 import urllib
 import datetime
+import math
 
 
 class ApplicationController(a.AdminController):
@@ -70,6 +73,7 @@ class ApplicationController(a.AdminController):
                 ]),
             a.links("Navigate", [
                 a.link("apps", "Go back"),
+                a.link("rooms", "See game rooms", icon="th-large", game_name=game_name),
                 a.link("new_game_server", "Create Game Server",
                        icon="plus", game_name=game_name),
                 a.link("/environment/app", "Manage app '{0}' at 'Environment' service.".format(data["app_name"]),
@@ -701,7 +705,7 @@ class Delivery(object):
         deployments = self.application.deployments
 
         try:
-            hosts_list = yield hosts.list_hosts()
+            hosts_list = yield hosts.list_enabled_hosts()
         except HostError as e:
             raise a.ActionError("Failed to list hosts: " + e.message)
 
@@ -1115,14 +1119,23 @@ class DebugHostController(a.AdminController):
         except HostNotFound:
             raise a.ActionError("Server not found")
 
+        try:
+            region = yield hosts.get_region(host.region)
+        except RegionNotFound:
+            raise a.ActionError("Region not found")
+        except RegionError as e:
+            raise a.ActionError(e.message)
+
         raise a.Return({
-            "host": host
+            "host": host,
+            "region": region
         })
 
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("hosts", "Hosts"),
+                a.link("regions", "Regions"),
+                a.link("region", data["region"].name, region_id=data["region"].region_id),
                 a.link("host", data["host"].name,
                        host_id=self.context.get("host_id"))
             ], "Debug"),
@@ -1138,14 +1151,20 @@ class DebugHostController(a.AdminController):
 
 class NewHostController(a.AdminController):
     @coroutine
-    def create(self, name, internal_location, region, host_default="false"):
+    def create(self, name, internal_location):
         hosts = self.application.hosts
 
-        if not region:
-            raise a.ActionError("Please define a region for a host")
+        region_id = self.context.get("region_id")
 
         try:
-            host_id = yield hosts.new_host(name, internal_location, region, host_default == "true")
+            yield hosts.get_region(region_id)
+        except RegionNotFound:
+            raise a.ActionError("Region not found")
+        except RegionError as e:
+            raise a.ActionError(e.message)
+
+        try:
+            host_id = yield hosts.new_host(name, internal_location, region_id)
         except HostError as e:
             raise a.ActionError("Failed to create new host: " + e.message)
 
@@ -1155,31 +1174,31 @@ class NewHostController(a.AdminController):
             host_id=host_id)
 
     @coroutine
-    def get(self):
+    def get(self, region_id):
+
         hosts = self.application.hosts
+
         try:
-            regions = yield hosts.list_regions()
+            region = yield hosts.get_region(region_id)
+        except RegionNotFound:
+            raise a.ActionError("Region not found")
         except RegionError as e:
-            raise a.ActionError("Failed to list regions: " + e.message)
+            raise a.ActionError(e.message)
 
         raise a.Return({
-            "regions": {
-                region.region_id: region.name
-                for region in regions
-            }
+            "region": region
         })
 
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("hosts", "Hosts")
+                a.link("regions", "Regions"),
+                a.link("region", data["region"].name, region_id=data["region"].region_id),
             ], "New host"),
             a.form("New host", fields={
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "region": a.field("Host region", "select", "primary", "non-empty", order=2, values=data["regions"]),
                 "internal_location":
-                    a.field("Internal location (including scheme)", "text", "primary", "non-empty", order=3),
-                "host_default": a.field("Is Default?", "switch", "primary", "non-empty", order=4),
+                    a.field("Internal location (including scheme)", "text", "primary", "non-empty", order=2)
             }, methods={
                 "create": a.method("Create", "primary")
             }, data=data),
@@ -1197,7 +1216,7 @@ class RootAdminController(a.AdminController):
         return [
             a.links("Game service", [
                 a.link("apps", "Applications", icon="mobile"),
-                a.link("hosts", "Hosts", icon="server"),
+                a.link("regions", "Regions", icon="globe"),
                 a.link("bans", "Bans", icon="ban")
             ])
         ]
@@ -1212,11 +1231,17 @@ class HostController(a.AdminController):
         host_id = self.context.get("host_id")
         hosts = self.application.hosts
 
+        try:
+            host = yield hosts.get_host(host_id)
+        except HostNotFound:
+            raise a.ActionError("No such host")
+
         yield hosts.delete_host(host_id)
 
         raise a.Redirect(
-            "hosts",
-            message="Host has been deleted")
+            "region",
+            message="Host has been deleted",
+            region_id=host.region)
 
     @coroutine
     def get(self, host_id):
@@ -1228,74 +1253,64 @@ class HostController(a.AdminController):
             raise a.ActionError("No such host")
 
         try:
-            regions = yield hosts.list_regions()
+            region = yield hosts.get_region(host.region)
+        except RegionNotFound:
+            raise a.ActionError("Region not found")
         except RegionError as e:
-            raise a.ActionError("Failed to list regions: " + e.message)
+            raise a.ActionError(e.message)
 
         result = {
             "name": host.name,
+            "host": host,
+            "region": region,
             "internal_location": host.internal_location,
-            "geo_location": str(host.geo_location),
-            "host_default": "true" if host.default else "false",
-            "host_enabled": "true" if host.enabled else "false",
-            "region": host.region,
-            "regions": {
-                region.region_id: region.name
-                for region in regions
-            }
+            "host_enabled": "true" if host.enabled else "false"
         }
 
         raise a.Return(result)
 
     def render(self, data):
+
+        host = data["host"]
+
         return [
             a.breadcrumbs([
-                a.link("hosts", "Hosts")
+                a.link("regions", "Regions"),
+                a.link("region", data["region"].name, region_id=data["region"].region_id),
             ], data["name"]),
             a.links("Debug", [
                 a.link("debug_host", "Debug this host", icon="bug", host_id=self.context.get("host_id")),
             ]),
+            a.notice("Status", """
+                STATUS: <b>{0}</b><br>
+                CPU: <b>{1}%</b><br>
+                MEMORY: <b>{2}%</b><br>
+                Last heartbeat check: <b>{3}</b>
+            """.format(host.state, host.cpu, host.memory, str(host.heartbeat))),
             a.form("Host '{0}' information".format(data["name"]), fields={
                 "host_enabled": a.field("Enabled (can accept players)", "switch", "primary", order=0),
                 "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "region": a.field("Host region", "select", "primary", "non-empty", order=2, values=data["regions"]),
                 "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty",
-                                             order=3),
-                "geo_location": a.field("Geo location", "readonly", "primary", order=4),
-                "host_default": a.field("Is default?", "switch", "primary", order=5),
+                                             order=3)
             }, methods={
                 "update": a.method("Update", "primary", order=1),
                 "delete": a.method("Delete", "danger", order=2)
-            }, data=data),
-            a.form("Update geo location".format(data["name"]), fields={
-                "external_location": a.field("Paste external host name (or IP) to calculate geo location",
-                                             "text", "primary", "non-empty", order=1)
-            }, methods={
-                "update_geo": a.method("Update", "primary", order=1)
-            }, data=data),
-            a.links("Navigate", [
-                a.link("hosts", "Go back")
-            ])
+            }, data=data)
         ]
 
     def access_scopes(self):
         return ["game_admin"]
 
     @coroutine
-    def update(self, name, internal_location, region, host_default="false", host_enabled="false"):
+    def update(self, name, internal_location, host_enabled="false"):
         host_id = self.context.get("host_id")
         hosts = self.application.hosts
-
-        if not region:
-            raise a.ActionError("Region is not defined")
 
         try:
             yield hosts.update_host(
                 host_id,
                 name,
                 internal_location,
-                region,
-                host_default == "true",
                 host_enabled == "true")
         except HostError as e:
             raise a.ActionError("Failed to update host: " + e.message)
@@ -1304,50 +1319,18 @@ class HostController(a.AdminController):
                          message="Host has been updated",
                          host_id=host_id)
 
-    @coroutine
-    def update_geo(self, external_location):
 
-        host_id = self.context.get("host_id")
-
-        try:
-            external_ip = socket.gethostbyname(external_location)
-        except socket.gaierror:
-            raise a.ActionError("Failed to lookup hostname")
-
-        geo = geolite2.lookup(external_ip)
-
-        if geo is None:
-            raise a.ActionError("Failed to lookup IP address ({0})".format(external_ip))
-
-        x, y = geo.location
-
-        hosts = self.application.hosts
-
-        try:
-            yield hosts.update_host_geo_location(host_id, x, y)
-        except HostError as e:
-            raise a.ActionError(e.message)
-
-        raise a.Redirect("host",
-                         message="Geo location updated",
-                         host_id=host_id)
-
-
-class HostsController(a.AdminController):
+class RegionsController(a.AdminController):
     @coroutine
     def get(self):
         hosts = self.application.hosts
 
         try:
-            hosts_list = yield hosts.list_hosts()
             regions_list = yield hosts.list_regions()
-        except HostError as e:
-            raise a.ActionError("Failed to fetch hosts: " + e.message)
         except RegionError as e:
             raise a.ActionError("Failed to fetch regions: " + e.message)
 
         result = {
-            "hosts": hosts_list,
             "regions": regions_list
         }
 
@@ -1355,18 +1338,13 @@ class HostsController(a.AdminController):
 
     def render(self, data):
         return [
-            a.breadcrumbs([], "Hosts"),
-            a.links("Hosts", links=[
-                a.link("host", host.name, icon="server", host_id=host.host_id)
-                for host in data["hosts"]
-                ]),
+            a.breadcrumbs([], "Regions"),
             a.links("Regions", links=[
                 a.link("region", region.name, icon="globe", region_id=region.region_id)
                 for region in data["regions"]
                 ]),
             a.links("Navigate", [
                 a.link("index", "Go back"),
-                a.link("new_host", "New host", "plus"),
                 a.link("new_region", "New region", "plus")
             ])
         ]
@@ -1602,16 +1580,27 @@ class RegionController(a.AdminController):
             raise a.ActionError("Failed to delete region: " + e.message)
 
         raise a.Redirect(
-            "hosts",
+            "regions",
             message="Region has been deleted")
 
     @coroutine
     def get(self, region_id):
         hosts = self.application.hosts
-        region = yield hosts.get_region(region_id)
+
+        try:
+            region = yield hosts.get_region(region_id)
+        except RegionNotFound:
+            raise a.ActionError("Region not found")
+        except RegionError as e:
+            raise a.ActionError(e.message)
+
+        hosts_list = yield hosts.list_hosts(region.region_id)
 
         result = {
-            "name": region.name
+            "name": region.name,
+            "hosts": hosts_list,
+            "geo_location": str(region.geo_location),
+            "region_default": "true" if region.default else "false"
         }
 
         raise a.Return(result)
@@ -1619,17 +1608,71 @@ class RegionController(a.AdminController):
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("hosts", "Hosts"),
-                a.link("hosts", "Regions"),
+                a.link("regions", "Regions"),
             ], data["name"]),
+
+            a.content("Hosts", [
+                {
+                    "id": "name",
+                    "title": "Host Name"
+                },
+                {
+                    "id": "status",
+                    "title": "Status"
+                },
+                {
+                    "id": "enabled",
+                    "title": "Enabled"
+                },
+                {
+                    "id": "cpu",
+                    "title": "CPU Load"
+                },
+                {
+                    "id": "memory",
+                    "title": "Memory Load"
+                },
+                {
+                    "id": "heartbeat",
+                    "title": "Last Check"
+                }
+            ], [
+                {
+                    "name": [
+                        a.link("host", host.name,
+                       icon="battery-{0}".format(min(int(host.load / 20), 4)), host_id=host.host_id)
+                    ],
+                    "enabled": [
+                        a.status(
+                            "Yes" if host.enabled else "No",
+                            "success" if host.enabled else "danger")],
+                    "cpu": "{0} %".format(host.cpu) if host.active else "-",
+                    "memory": "{0} %".format(host.memory) if host.active else "-",
+                    "status": [a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
+                    "heartbeat": str(host.heartbeat)
+                }
+                for host in data["hosts"]
+            ], "primary", empty="No hosts to display"),
+
             a.form("Region '{0}' information".format(data["name"]), fields={
-                "name": a.field("Region name", "text", "primary", "non-empty", order=1)
+                "name": a.field("Region name", "text", "primary", "non-empty", order=1),
+                "geo_location": a.field("Geo location", "readonly", "primary", order=2),
+                "region_default": a.field(
+                    "Default region (to connect to in case user cannot be located)", "switch", "primary", order=3)
             }, methods={
                 "update": a.method("Update", "primary", order=1),
                 "delete": a.method("Delete", "danger", order=2)
             }, data=data),
+            a.form("Update geo location".format(data["name"]), fields={
+                "external_location": a.field("Paste external host name (or IP) to calculate geo location",
+                                             "text", "primary", "non-empty", order=1)
+            }, methods={
+                "update_geo": a.method("Update", "primary", order=1)
+            }, data=data),
             a.links("Navigate", [
-                a.link("hosts", "Go back")
+                a.link("hosts", "Go back"),
+                a.link("new_host", "New host", "plus",
+                       region_id=self.context.get("region_id"))
             ])
         ]
 
@@ -1637,14 +1680,43 @@ class RegionController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def update(self, name):
+    def update_geo(self, external_location):
+
+        region_id = self.context.get("region_id")
+
+        try:
+            external_ip = socket.gethostbyname(external_location)
+        except socket.gaierror:
+            raise a.ActionError("Failed to lookup hostname")
+
+        geo = geolite2.lookup(external_ip)
+
+        if geo is None:
+            raise a.ActionError("Failed to lookup IP address ({0})".format(external_ip))
+
+        x, y = geo.location
+
+        hosts = self.application.hosts
+
+        try:
+            yield hosts.update_region_geo_location(region_id, x, y)
+        except HostError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect("region",
+                         message="Geo location updated",
+                         region_id=region_id)
+
+    @coroutine
+    def update(self, name, region_default="false"):
         region_id = self.context.get("region_id")
         hosts = self.application.hosts
 
         try:
             yield hosts.update_region(
                 region_id,
-                name)
+                name,
+                region_default == "true")
         except RegionError as e:
             raise a.ActionError("Failed to update region: " + e.message)
 
@@ -1655,11 +1727,11 @@ class RegionController(a.AdminController):
 
 class NewRegionController(a.AdminController):
     @coroutine
-    def create(self, name):
+    def create(self, name, region_default="false"):
         hosts = self.application.hosts
 
         try:
-            region_id = yield hosts.new_region(name)
+            region_id = yield hosts.new_region(name, region_default == "true")
         except RegionError as e:
             raise a.ActionError("Failed to create new region: " + e.message)
 
@@ -1671,11 +1743,13 @@ class NewRegionController(a.AdminController):
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("hosts", "Hosts"),
-                a.link("hosts", "Regions"),
+                a.link("regions", "Regions")
             ], "New region"),
             a.form("New region", fields={
-                "name": a.field("Region name", "text", "primary", "non-empty", order=1)
+                "name": a.field("Region name", "text", "primary", "non-empty", order=1),
+                "region_default": a.field(
+                    "Default region (to connect to in "
+                    "case user cannot be located)", "switch", "primary", "non-empty", order=2),
             }, methods={
                 "create": a.method("Create", "primary")
             }, data=data),
@@ -1686,3 +1760,312 @@ class NewRegionController(a.AdminController):
 
     def access_scopes(self):
         return ["game_admin"]
+
+
+class RoomController(a.AdminController):
+    @coroutine
+    def get(self, room_id):
+
+        rooms = self.application.rooms
+        env_service = self.application.env_service
+
+        try:
+            room = yield rooms.get_room(self.gamespace, room_id)
+        except RoomNotFound:
+            raise a.ActionError("No such room")
+        except RoomError as e:
+            raise a.ActionError(e.message)
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, room.game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        raise Return({
+            "game_name": room.game_name,
+            "game_title": app["title"]
+        })
+
+    @coroutine
+    def delete(self, **ignored):
+        rooms = self.application.rooms
+
+        room_id = self.context.get("room_id")
+
+        try:
+            room = yield rooms.get_room(self.gamespace, room_id)
+        except RoomNotFound:
+            raise a.ActionError("No such room")
+        except RoomError as e:
+            raise a.ActionError(e.message)
+
+        try:
+            yield rooms.terminate_room(self.gamespace, room_id)
+        except RoomError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect(
+            "rooms",
+            message="Game has been shot down",
+            game_name=room.game_name)
+
+    def render(self, data):
+        game_name = data["game_name"]
+
+        return [
+            a.breadcrumbs([
+                a.link("apps", "Applications"),
+                a.link("app", data["game_title"], record_id=game_name),
+                a.link("rooms", "Rooms", game_name=game_name)
+            ], self.context.get("room_id")),
+            a.form("Actions", fields={}, methods={
+                "delete": a.method("Delete room", "danger", danger="Are you sure? Game server will be shot down "
+                                                                   "and users will be kicked out.")
+            }, data=data),
+            a.links("Navigate", [
+                a.link("rooms", "Go back", game_name=game_name)
+            ])
+        ]
+
+
+class RoomsController(a.AdminController):
+
+    ROOMS_PER_PAGE = 20
+
+    @coroutine
+    def get(self, game_name, page=1,
+            game_version=None,
+            game_server=None,
+            game_deployment=None,
+            game_settings=None,
+            game_region=None,
+            game_host=None):
+
+        env_service = self.application.env_service
+        gameservers = self.application.gameservers
+        deployments = self.application.deployments
+        hosts = self.application.hosts
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        game_versions = {
+            v_name: v_name
+            for v_name, v_id in app["versions"].iteritems()
+        }
+
+        game_versions[""] = "Any"
+
+        try:
+            game_servers = yield gameservers.list_game_servers(self.gamespace, game_name)
+        except GameError as e:
+            raise a.ActionError(e.message)
+
+        game_servers = {
+            game_server.game_server_id: game_server.name
+            for game_server in game_servers
+        }
+
+        game_servers[""] = "Any"
+
+        try:
+            game_deployments = yield deployments.list_deployments(self.gamespace, game_name)
+        except DeploymentError as e:
+            raise a.ActionError(e.message)
+
+        game_deployments = {
+            dep.deployment_id: dep.game_version + " / @" + dep.deployment_id
+            for dep in game_deployments
+        }
+
+        game_deployments[""] = "Any"
+
+        try:
+            game_regions = yield hosts.list_regions()
+        except RegionError as e:
+            raise a.ActionError(e.message)
+
+        game_regions = {
+            region.region_id: region.name
+            for region in game_regions
+        }
+
+        game_regions[""] = "Any"
+
+        try:
+            game_hosts = yield hosts.list_hosts(game_region)
+        except RegionError as e:
+            raise a.ActionError(e.message)
+
+        game_hosts = {
+            host.host_id: host.name
+            for host in game_hosts
+        }
+
+        game_hosts[""] = "Any"
+
+        query = RoomQuery(self.gamespace, game_name)
+
+        query.select_game_servers = True
+        query.select_hosts = True
+        query.select_regions = True
+
+        query.offset = (int(page) - 1) * RoomsController.ROOMS_PER_PAGE
+        query.limit = RoomsController.ROOMS_PER_PAGE
+
+        if game_version:
+            query.game_version = game_version
+
+        if game_server:
+            query.game_server_id = game_server
+
+        if game_deployment:
+            query.deployment_id = game_deployment
+
+        if game_settings:
+            try:
+                game_settings = json.loads(game_settings)
+            except (KeyError, ValueError):
+                raise a.ActionError("Corrupted settings")
+
+            cond = format_conditions_json('settings', game_settings)
+            query.add_conditions(cond)
+        else:
+            game_settings = {}
+
+        if game_region:
+            query.region_id = game_region
+
+        if game_host:
+            query.host_id = game_host
+
+        rooms, count = yield query.query(self.application.db, one=False, count=True)
+
+        pages = int(math.ceil(float(count) / float(RoomsController.ROOMS_PER_PAGE)))
+
+        result = {
+            "game_name": game_name,
+            "game_title": app["title"],
+
+            "game_versions": game_versions,
+            "game_version": game_version,
+
+            "game_servers": game_servers,
+            "game_server": game_server,
+
+            "game_deployments": game_deployments,
+            "game_deployment": game_deployment,
+
+            "game_settings": game_settings,
+
+            "game_regions": game_regions,
+            "game_region": game_region,
+
+            "game_hosts": game_hosts,
+            "game_host": game_host,
+
+            "page": page,
+            "rooms": rooms,
+            "pages_count": pages,
+            "total_count": count
+        }
+
+        raise a.Return(result)
+
+    @coroutine
+    def filter(self, **args):
+
+        game_name = self.context.get("game_name")
+        page = self.context.get("page", 1)
+
+        filters = {
+            "game_name": game_name,
+            "page": page
+        }
+
+        filters.update(args)
+
+        raise a.Redirect("rooms", **filters)
+
+    def render(self, data):
+
+        game_name = self.context.get("game_name")
+
+        rooms = [
+            {
+                "edit": [a.link("room", room.room_id, icon="th-large", room_id=room.room_id)],
+                "game_name": [a.link("app", room.game_name, icon="mobile", record_id=room.game_name)],
+                "game_version": [a.link("app_version", room.game_version, icon="tags",
+                                        app_id=room.game_name, version_id=room.game_version)],
+                "game_server": [a.link("game_server", game_server.name, icon="rocket",
+                                       game_server_id=game_server.game_server_id, game_name=room.game_name)],
+                "deployment": [a.link("deployment", room.deployment_id, icon="upload",
+                                      deployment_id=room.deployment_id, game_name=room.game_name,
+                                      game_version=room.game_version)],
+                "players": str(room.players) + " / " + str(room.max_players),
+                "region": [a.link("region", region.name, icon="globe", region_id=region.region_id)],
+                "host": [a.link("host", host.name, icon="server", host_id=host.host_id)],
+                "settings": [a.json_view(room.room_settings)],
+            }
+            for room, game_server, region, host in data["rooms"]
+        ]
+
+        return [
+            a.breadcrumbs([
+                a.link("apps", "Applications"),
+                a.link("app", data["game_title"], record_id=game_name)
+            ], "Rooms"),
+            a.content("Rooms: {0} total".format(data["total_count"]), [
+                {
+                    "id": "edit",
+                    "title": "Edit"
+                }, {
+                    "id": "game_name",
+                    "title": "Game"
+                }, {
+                    "id": "game_version",
+                    "title": "Game Version"
+                }, {
+                    "id": "game_server",
+                    "title": "Server"
+                }, {
+                    "id": "deployment",
+                    "title": "Deployment"
+                }, {
+                    "id": "players",
+                    "title": "Players"
+                }, {
+                    "id": "settings",
+                    "title": "Settings"
+                }, {
+                    "id": "region",
+                    "title": "Region"
+                }, {
+                    "id": "host",
+                    "title": "Host"
+                }], rooms, "default", empty="No rooms to display"),
+            a.pages(data["pages_count"]),
+            a.form("Filters", fields={
+                "game_version": a.field("Game Version", "select", "primary", values=data["game_versions"], order=1),
+                "game_server": a.field("Game Server", "select", "primary", values=data["game_servers"], order=2),
+                "game_deployment": a.field("Game Deployment",
+                                           "select", "primary", values=data["game_deployments"], order=3),
+                "game_region": a.field("Game Region",
+                                       "select", "primary", values=data["game_regions"], order=4),
+                "game_host": a.field("Game Host",
+                                     "select", "primary", values=data["game_hosts"], order=5),
+                "game_settings": a.field("Game Custom Settings",
+                                         "json", "primary", order=6, height=120),
+            }, methods={
+                "filter": a.method("Filter", "primary")
+            }, data=data, icon="filter"),
+            a.links("Navigate", [
+                a.link("app", "Go back", record_id=game_name)
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]
+

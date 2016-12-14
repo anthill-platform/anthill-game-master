@@ -80,3 +80,25 @@ class SpawnHandler(AuthenticatedHandler):
             raise HTTPError(500, "Failed to spawn: " + e.message)
 
         self.dumps(result)
+
+
+class TerminateHandler(AuthenticatedHandler):
+    @coroutine
+    @internal
+    def post(self):
+        room_id = self.get_argument("room_id")
+
+        gs = self.application.gs
+        s = gs.get_server_by_room(room_id)
+
+        if not s:
+            raise HTTPError(404, "No such server")
+
+        yield s.terminate()
+
+
+class HeartbeatHandler(AuthenticatedHandler):
+    @internal
+    def get(self):
+        report = self.application.heartbeat.report()
+        self.dumps(report)

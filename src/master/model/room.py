@@ -10,6 +10,9 @@ import common.database
 from common.internal import Internal, InternalError
 from common import random_string
 
+from gameserver import GameServerAdapter
+from host import RegionAdapter, HostAdapter, HostNotFound
+
 
 class ApproveFailed(Exception):
     pass
@@ -38,6 +41,7 @@ class RoomAdapter(object):
         self.game_version = data.get("game_version")
         self.max_players = data.get("max_players", 8)
         self.deployment_id = str(data.get("deployment_id", ""))
+        self.state = data.get("state", "NONE")
 
     def dump(self):
         return {
@@ -61,12 +65,19 @@ class RoomQuery(object):
         self.room_id = None
         self.host_id = None
         self.region_id = None
+        self.deployment_id = None
         self.state = None
         self.show_full = True
-        self.hosts_order = None
+        self.regions_order = None
         self.limit = 0
+        self.offset = 0
         self.other_conditions = []
         self.for_update = False
+        self.host_active = False
+
+        self.select_game_servers = False
+        self.select_hosts = False
+        self.select_regions = False
 
     def add_conditions(self, conditions):
 
@@ -77,8 +88,8 @@ class RoomQuery(object):
 
     def __values__(self):
         conditions = [
-            "`gamespace_id`=%s",
-            "`game_name`=%s"
+            "`rooms`.`gamespace_id`=%s",
+            "`rooms`.`game_name`=%s"
         ]
 
         data = [
@@ -87,31 +98,44 @@ class RoomQuery(object):
         ]
 
         if self.game_version:
-            conditions.append("`game_version`=%s")
+            conditions.append("`rooms`.`game_version`=%s")
             data.append(self.game_version)
 
         if self.game_server_id:
-            conditions.append("`game_server_id`=%s")
+            conditions.append("`rooms`.`game_server_id`=%s")
             data.append(str(self.game_server_id))
 
         if self.state:
-            conditions.append("`state`=%s")
+            conditions.append("`rooms`.`state`=%s")
             data.append(self.state)
 
         if not self.show_full:
-            conditions.append("`players`<`max_players`")
+            conditions.append("`rooms`.`players`<`rooms`.`max_players`")
 
         if self.host_id:
-            conditions.append("`host_id`=%s")
+            conditions.append("`rooms`.`host_id`=%s")
             data.append(str(self.host_id))
 
+        if self.deployment_id:
+            conditions.append("`rooms`.`deployment_id`=%s")
+            data.append(str(self.deployment_id))
+
         if self.region_id:
-            conditions.append("`region_id`=%s")
+            conditions.append("`rooms`.`region_id`=%s")
             data.append(str(self.region_id))
 
         if self.room_id:
-            conditions.append("`room_id`=%s")
+            conditions.append("`rooms`.`room_id`=%s")
             data.append(str(self.room_id))
+
+        if self.host_active:
+            conditions.append("""
+                (
+                    SELECT `hosts`.`host_state`
+                    FROM `hosts`
+                    WHERE `hosts`.`host_id` = `rooms`.`room_id`
+                ) = 'ACTIVE'
+            """)
 
         for condition, values in self.other_conditions:
             conditions.append(condition)
@@ -119,26 +143,43 @@ class RoomQuery(object):
 
         return conditions, data
 
-    def query(self):
-
+    @coroutine
+    def query(self, db, one=False, count=False):
         conditions, data = self.__values__()
 
         query = """
-            SELECT * FROM `rooms`
+            SELECT {0} * FROM `rooms`
+        """.format(
+            "SQL_CALC_FOUND_ROWS" if count else "")
+
+        if self.select_game_servers:
+            query += ",`game_servers`"
+            conditions.append("`game_servers`.`game_server_id`=`rooms`.`game_server_id`")
+
+        if self.select_hosts:
+            query += ",`hosts`"
+            conditions.append("`hosts`.`host_id`=`rooms`.`host_id`")
+
+        if self.select_regions:
+            query += ",`regions`"
+            conditions.append("`regions`.`region_id`=`rooms`.`region_id`")
+
+        query += """
             WHERE {0}
         """.format(" AND ".join(conditions))
 
-        if self.hosts_order and not self.host_id:
-            query += "ORDER BY FIELD(host_id, {0})".format(
-                ", ".join(["%s"] * len(self.hosts_order))
+        if self.regions_order and not self.host_id:
+            query += "ORDER BY FIELD(region_id, {0})".format(
+                ", ".join(["%s"] * len(self.regions_order))
             )
-            data.extend(self.hosts_order)
+            data.extend(self.regions_order)
 
         if self.limit:
             query += """
-                LIMIT %s
+                LIMIT %s,%s
             """
-            data.append(str(self.limit))
+            data.append(int(self.offset))
+            data.append(int(self.limit))
 
         if self.for_update:
             query += """
@@ -147,7 +188,43 @@ class RoomQuery(object):
 
         query += ";"
 
-        return query, data
+        if one:
+            result = yield db.get(query, *data)
+
+            if not result:
+                raise Return(None)
+
+            raise Return(RoomAdapter(result))
+        else:
+            result = yield db.query(query, *data)
+
+            count_result = 0
+
+            if count:
+                count_result = yield db.get(
+                    """
+                        SELECT FOUND_ROWS() AS count;
+                    """)
+                count_result = count_result["count"]
+
+            items = map(RoomAdapter, result)
+
+            adapters = []
+
+            if self.select_game_servers:
+                adapters.append(map(GameServerAdapter, result))
+            if self.select_regions:
+                adapters.append(map(RegionAdapter, result))
+            if self.select_hosts:
+                adapters.append(map(HostAdapter, result))
+
+            if adapters:
+                items = zip(items, *adapters)
+
+            if count:
+                raise Return((items, count_result))
+
+            raise Return(items)
 
 
 class RoomsModel(Model):
@@ -177,9 +254,10 @@ class RoomsModel(Model):
     def get_setup_triggers(self):
         return ["player_removal"]
 
-    def __init__(self, db):
+    def __init__(self, db, hosts):
         self.db = db
         self.internal = Internal()
+        self.hosts = hosts
 
     @coroutine
     def get_players_count(self):
@@ -196,13 +274,13 @@ class RoomsModel(Model):
         raise Return(count["count"])
 
     @coroutine
-    def __insert_player__(self, gamespace, account_id, room_id, key, access_token, db, trigger_remove=True):
+    def __insert_player__(self, gamespace, account_id, room_id, host_id, key, access_token, db, trigger_remove=True):
         record_id = yield db.insert(
             """
             INSERT INTO `players`
-            (`gamespace_id`, `account_id`, `room_id`, `key`, `access_token`)
-            VALUES (%s, %s, %s, %s, %s);
-            """, gamespace, account_id, room_id, key, access_token
+            (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`)
+            VALUES (%s, %s, %s, %s, %s, %s);
+            """, gamespace, account_id, room_id, host_id, key, access_token
         )
 
         if trigger_remove:
@@ -329,8 +407,9 @@ class RoomsModel(Model):
                 "{}", ujson.dumps(room_settings), host.host_id, host.region, deployment_id
             )
 
-            record_id = yield self.__insert_player__(gamespace, account_id, room_id, key, access_token, self.db,
-                                                     trigger_remove)
+            record_id = yield self.__insert_player__(
+                gamespace, account_id, room_id, host.host_id, key, access_token, self.db, trigger_remove)
+
         except common.database.DatabaseError as e:
             raise RoomError("Failed to create a room: " + e.args[1])
         else:
@@ -339,7 +418,7 @@ class RoomsModel(Model):
     @coroutine
     def find_and_join_room(self, gamespace, game_name, game_version, game_server_id,
                            account_id, access_token, settings,
-                           hosts_order=None, region=None):
+                           regions_order=None, region=None):
 
         """
         Find the room and join into it, if any
@@ -351,7 +430,7 @@ class RoomsModel(Model):
         :param access_token: active player's access token
         :param settings: room specific filters, defined like so:
                 {"filterA": 5, "filterB": true, "filterC": {"@func": ">", "@value": 10}}
-        :param hosts_order: a list of host id's to order result around
+        :param regions_order: a list of region id's to order result around
         :param region: an id of the region the search should be locked around
         :returns a pair of record_id, a key (an unique string to find the record by) for the player and room info
         """
@@ -366,25 +445,24 @@ class RoomsModel(Model):
                 query = RoomQuery(gamespace, game_name, game_version, game_server_id)
 
                 query.add_conditions(conditions)
-                query.hosts_order = hosts_order
+                query.regions_order = regions_order
                 query.for_update = True
                 query.show_full = False
                 query.region_id = region
+                query.host_active = True
 
-                text, data = query.query()
-
-                # search for a room first (and lock it for a while)
-                room = yield db.get(text, *data)
+                room = yield query.query(db, one=True)
 
                 if room is None:
                     yield db.commit()
                     raise RoomNotFound()
 
-                room_id = room["room_id"]
+                room_id = room.room_id
 
                 # at last, join into the player list
-                record_id, key = yield self.__join_room__(gamespace, room_id, account_id, access_token, db)
-                raise Return((record_id, key, RoomAdapter(room)))
+                record_id, key = yield self.__join_room__(
+                    gamespace, room_id, room.host_id, account_id, access_token, db)
+                raise Return((record_id, key, room))
 
         except common.database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
@@ -411,26 +489,25 @@ class RoomsModel(Model):
                 query.for_update = True
                 query.show_full = False
 
-                text, data = query.query()
-
-                # search for a room first (and lock it for a while)
-                room = yield db.get(text, *data)
+                room = yield query.query(db, one=True)
 
                 if room is None:
                     yield db.commit()
                     raise RoomNotFound()
 
-                room_id = room["room_id"]
+                room_id = room.room_id
 
                 # at last, join into the player list
-                record_id, key = yield self.__join_room__(gamespace, room_id, account_id, access_token, db)
-                raise Return((record_id, key, RoomAdapter(room)))
+                record_id, key = yield self.__join_room__(
+                    gamespace, room_id, room.host_id, account_id, access_token, db)
+
+                raise Return((record_id, key, room))
 
         except common.database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
 
     @coroutine
-    def find_room(self, gamespace, game_name, game_version, game_server_id, settings, hosts_order=None):
+    def find_room(self, gamespace, game_name, game_version, game_server_id, settings, regions_order=None):
 
         try:
             conditions = common.database.format_conditions_json('settings', settings)
@@ -442,20 +519,18 @@ class RoomsModel(Model):
             query = RoomQuery(gamespace, game_name, game_version, game_server_id)
 
             query.add_conditions(conditions)
-            query.hosts_order = hosts_order
+            query.regions_order = regions_order
             query.state = 'SPAWNED'
             query.limit = 1
 
-            text, data = query.query()
-
-            room = yield self.db.get(text, *data)
+            room = yield query.query(self.db, one=True)
         except common.database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
 
         if room is None:
             raise RoomNotFound()
 
-        raise Return(RoomAdapter(room))
+        raise Return(room)
 
     @coroutine
     def update_room_settings(self, gamespace, room_id, room_settings):
@@ -471,6 +546,44 @@ class RoomsModel(Model):
                 WHERE `gamespace_id`=%s AND `room_id`=%s
                 """, ujson.dumps(room_settings), gamespace, room_id
             )
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to update a room: " + e.args[1])
+
+    @coroutine
+    def update_rooms_state(self, host_id, state, rooms=None, exclusive=False):
+
+        if rooms and not isinstance(rooms, list):
+            raise RoomError("Not a list")
+
+        if rooms is not None and not rooms:
+            return
+
+        try:
+            if rooms is None:
+                yield self.db.execute(
+                    """
+                    UPDATE `rooms`
+                    SET `state`=%s
+                    WHERE `host_id`=%s;
+                    """, state, host_id
+                )
+            else:
+                if exclusive:
+                    yield self.db.execute(
+                        """
+                        UPDATE `rooms`
+                        SET `state`=%s
+                        WHERE `host_id`=%s AND `room_id` NOT IN (%s);
+                        """, state, host_id, rooms
+                    )
+                else:
+                    yield self.db.execute(
+                        """
+                        UPDATE `rooms`
+                        SET `state`=%s
+                        WHERE `host_id`=%s AND `room_id` IN (%s);
+                        """, state, host_id, rooms
+                    )
         except common.database.DatabaseError as e:
             raise RoomError("Failed to update a room: " + e.args[1])
 
@@ -514,7 +627,7 @@ class RoomsModel(Model):
         raise Return(result)
 
     @coroutine
-    def __join_room__(self, gamespace, room_id, account_id, access_token, db):
+    def __join_room__(self, gamespace, room_id, host_id, account_id, access_token, db):
         """
         Joins the player to the room
         :param gamespace: the gamespace
@@ -533,7 +646,9 @@ class RoomsModel(Model):
             yield self.__inc_players_num__(room_id, db)
             yield db.commit()
 
-            record_id = yield self.__insert_player__(gamespace, account_id, room_id, key, access_token, db, True)
+            record_id = yield self.__insert_player__(
+                gamespace, account_id, room_id, host_id, key, access_token, db, True)
+
             yield db.commit()
 
         except common.database.DatabaseError as e:
@@ -574,7 +689,7 @@ class RoomsModel(Model):
 
     @coroutine
     def list_rooms(self, gamespace, game_name, game_version, game_server_id, settings,
-                   hosts_order=None, show_full=True, region=None, host=None):
+                   regions_order=None, show_full=True, region=None, host=None):
 
         try:
             conditions = common.database.format_conditions_json('settings', settings)
@@ -585,19 +700,78 @@ class RoomsModel(Model):
             query = RoomQuery(gamespace, game_name, game_version, game_server_id)
 
             query.add_conditions(conditions)
-            query.hosts_order = hosts_order
+            query.regions_order = regions_order
             query.show_full = show_full
             query.state = 'SPAWNED'
             query.host_id = host
             query.region_id = region
+            query.host_active = True
 
-            text, data = query.query()
-
-            rooms = yield self.db.query(text, *data)
+            rooms = yield query.query(self.db, one=False)
         except common.database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
 
-        raise Return(map(RoomAdapter, rooms))
+        raise Return(rooms)
+
+    @coroutine
+    def terminate_room(self, gamespace, room_id):
+
+        room = yield self.get_room(gamespace, room_id)
+
+        try:
+            host = yield self.hosts.get_host(room.host_id)
+        except HostNotFound:
+            logging.error("Failed to get host, not found: " + room.host_id)
+        else:
+            server_host = host.internal_location
+
+            try:
+                yield self.internal.post(
+                    server_host, "terminate",
+                    {
+                        "room_id": room_id,
+                        "gamespace": gamespace
+                    }, discover_service=False, timeout=60)
+
+            except InternalError as e:
+                raise RoomError("Failed to terminate a room: " + str(e.code) + " " + e.body)
+
+        yield self.remove_room(gamespace, room_id)
+
+    @coroutine
+    def remove_host_rooms(self, host_id, except_rooms=None):
+        try:
+            # cleanup empty room
+
+            with (yield self.db.acquire()) as db:
+                if except_rooms:
+                    yield db.execute(
+                        """
+                        DELETE FROM `rooms`
+                        WHERE `room_id` NOT IN %s;
+                        """, except_rooms
+                    )
+                    yield db.execute(
+                        """
+                        DELETE FROM `players`
+                        WHERE `room_id` NOT IN %s;
+                        """, except_rooms
+                    )
+                else:
+                    yield db.execute(
+                        """
+                        DELETE FROM `rooms`
+                        WHERE `host_id`=%s;
+                        """, host_id
+                    )
+                    yield db.execute(
+                        """
+                        DELETE FROM `players`
+                        WHERE `host_id`=%s
+                        """, host_id
+                    )
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to remove rooms: " + e.args[1])
 
     @coroutine
     def remove_room(self, gamespace, room_id):
