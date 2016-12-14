@@ -42,7 +42,7 @@ class HostAdapter(object):
         self.load = int(data.get("host_load", 0) * 100.0)
 
         self.state = data.get("host_state", "ERROR")
-        self.active = self.state == "ACTIVE"
+        self.active = self.state in ["ACTIVE", "OVERLOAD"]
 
 
 class RegionAdapter(object):

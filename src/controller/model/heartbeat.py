@@ -12,8 +12,7 @@ class HeartbeatModel(Model):
         return [room_id for room_id, room in rooms.list()]
 
     def report(self):
-        m = virtual_memory()
-        memory_load = int((1.0 - float(m.free) / float(m.total)) * 100)
+        memory_load = int(virtual_memory().percent)
         cpu_load = int(cpu_percent())
 
         rooms = self.__rooms_report__()
