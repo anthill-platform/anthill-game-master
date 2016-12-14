@@ -133,7 +133,7 @@ class RoomQuery(object):
                 (
                     SELECT `hosts`.`host_state`
                     FROM `hosts`
-                    WHERE `hosts`.`host_id` = `rooms`.`room_id`
+                    WHERE `hosts`.`host_id` = `rooms`.`host_id`
                 ) IN ('ACTIVE', 'OVERLOAD')
             """)
 
