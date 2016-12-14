@@ -237,9 +237,9 @@ class RoomsHandler(AuthenticatedHandler):
 
             if not my_region_only:
                 closest_regions = yield hosts.list_closest_regions(x, y)
-                ordered_regions = [region.region_id for region in ordered_regions]
+                ordered_regions = [region.region_id for region in closest_regions]
         else:
-            ordered_hosts = None
+            ordered_regions = None
 
         rooms = yield rooms_data.list_rooms(
             gamespace, game_name, game_version,
