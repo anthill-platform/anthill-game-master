@@ -61,7 +61,7 @@ class HostsModel(Model):
         return self.db
 
     def get_setup_tables(self):
-        return ["hosts", "regions"]
+        return ["regions", "hosts"]
 
     @coroutine
     def new_region(self, name, default):

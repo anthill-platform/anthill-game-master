@@ -167,7 +167,7 @@ class GameServer(object):
     @coroutine
     def inited(self, settings):
 
-        self.room.update_settings({}, settings)
+        yield self.room.update_settings({}, settings)
 
         self.__notify__(u"Inited.")
         self.set_status(GameServer.STATUS_RUNNING)
