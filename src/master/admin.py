@@ -1345,7 +1345,8 @@ class RegionsController(a.AdminController):
                 ]),
             a.links("Navigate", [
                 a.link("index", "Go back"),
-                a.link("new_region", "New region", "plus")
+                a.link("new_region", "New region", "plus"),
+                a.link("hosts", "See Full Hosts List", "server")
             ])
         ]
 
@@ -2069,3 +2070,90 @@ class RoomsController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
+
+class HostsController(a.AdminController):
+
+    @coroutine
+    def get(self):
+        hosts = self.application.hosts
+
+        regions_list = yield hosts.list_regions()
+        hosts_list = yield hosts.list_hosts()
+
+        result = {
+            "hosts": hosts_list,
+            "regions": {
+                region.region_id: region
+                for region in regions_list
+            }
+        }
+
+        raise a.Return(result)
+
+    def render(self, data):
+
+        regions = data["regions"]
+
+        return [
+            a.breadcrumbs([
+                a.link("regions", "Regions"),
+            ], "Full Host List"),
+
+            a.content("Hosts", [
+                {
+                    "id": "region",
+                    "title": "Region"
+                },
+                {
+                    "id": "name",
+                    "title": "Host Name"
+                },
+                {
+                    "id": "status",
+                    "title": "Status"
+                },
+                {
+                    "id": "enabled",
+                    "title": "Enabled"
+                },
+                {
+                    "id": "cpu",
+                    "title": "CPU Load"
+                },
+                {
+                    "id": "memory",
+                    "title": "Memory Load"
+                },
+                {
+                    "id": "heartbeat",
+                    "title": "Last Check"
+                }
+            ], [
+                {
+                    "region": [
+                        a.link("region", regions[host.region_id].name if host.region_id in regions else "Unknown",
+                               icon="globe", region_id=host.region_id)
+                    ],
+                    "name": [
+                        a.link("host", host.name,
+                       icon="battery-{0}".format(min(int(host.load / 20), 4)), host_id=host.host_id)
+                    ],
+                    "enabled": [
+                        a.status(
+                            "Yes" if host.enabled else "No",
+                            "success" if host.enabled else "danger")],
+                    "cpu": "{0} %".format(host.cpu) if host.active else "-",
+                    "memory": "{0} %".format(host.memory) if host.active else "-",
+                    "status": [a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
+                    "heartbeat": str(host.heartbeat)
+                }
+                for host in data["hosts"]
+            ], "primary", empty="No hosts to display"),
+
+            a.links("Navigate", [
+                a.link("regions", "Go back")
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]

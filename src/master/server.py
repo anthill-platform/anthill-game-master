@@ -74,6 +74,7 @@ class GameMasterServer(common.server.Server):
             "game_server_version": admin.GameServerVersionController,
 
             "host": admin.HostController,
+            "hosts": admin.HostsController,
             "debug_host": admin.DebugHostController,
             "new_host": admin.NewHostController,
 

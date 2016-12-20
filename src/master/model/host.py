@@ -31,6 +31,7 @@ class HostNotFound(Exception):
 class HostAdapter(object):
     def __init__(self, data):
         self.host_id = str(data.get("host_id"))
+        self.region_id = str(data.get("host_region"))
         self.name = data.get("host_name")
         self.internal_location = data.get("internal_location")
         self.region = data.get("host_region")
