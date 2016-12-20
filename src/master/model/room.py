@@ -748,14 +748,14 @@ class RoomsModel(Model):
                     yield db.execute(
                         """
                         DELETE FROM `rooms`
-                        WHERE `room_id` NOT IN %s;
-                        """, except_rooms
+                        WHERE `host_id`=%s AND `room_id` NOT IN %s;
+                        """, host_id, except_rooms
                     )
                     yield db.execute(
                         """
                         DELETE FROM `players`
-                        WHERE `room_id` NOT IN %s;
-                        """, except_rooms
+                        WHERE `host_id`=%s AND `room_id` NOT IN %s;
+                        """, host_id, except_rooms
                     )
                 else:
                     yield db.execute(
