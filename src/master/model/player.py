@@ -74,8 +74,8 @@ class Player(object):
         location = self.get_location()
 
         if location:
-            x, y = location
-            region = yield self.hosts.get_closest_region(x, y)
+            p_lat, p_long = location
+            region = yield self.hosts.get_closest_region(p_long, p_lat)
         else:
             region = yield self.hosts.get_default_region()
 
@@ -197,16 +197,16 @@ class Player(object):
         my_region_only = None
 
         if geo:
-            x, y = geo
+            p_lat, p_long = geo
 
             if lock_my_region:
                 try:
-                    my_region_only = yield self.hosts.get_closest_region(x, y)
+                    my_region_only = yield self.hosts.get_closest_region(p_long, p_lat)
                 except RegionNotFound:
                     pass
 
             if not my_region_only:
-                regions = yield self.hosts.list_closest_regions(x, y)
+                regions = yield self.hosts.list_closest_regions(p_long, p_lat)
                 regions_order = [region.region_id for region in regions]
 
         try:

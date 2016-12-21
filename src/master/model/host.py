@@ -121,21 +121,21 @@ class HostsModel(Model):
         raise Return(HostAdapter(host))
 
     @coroutine
-    def get_closest_region(self, x, y):
+    def get_closest_region(self, p_long, p_lat):
         try:
             region = yield self.db.get(
                 """
                 SELECT *,
                     ST_X(`region_location`) AS `region_location_x`,
                     ST_Y(`region_location`) AS `region_location_y`,
-                    ST_Distance(`region_location`, point(%s, %s)) AS distance
+                    ST_Distance_Sphere(`region_location`, point(%s, %s)) AS distance
                 FROM `regions`
                 ORDER BY distance ASC
                 LIMIT 1;
-                """, x, y
+                """, p_long, p_lat
             )
         except common.database.DatabaseError as e:
-            raise HostError("Failed to get server: " + e.args[1])
+            raise RegionError("Failed to get closest region: " + e.args[1])
 
         if region is None:
             raise RegionNotFound()
@@ -143,17 +143,17 @@ class HostsModel(Model):
         raise Return(RegionAdapter(region))
 
     @coroutine
-    def list_closest_regions(self, x, y):
+    def list_closest_regions(self, p_long, p_lat):
         try:
             hosts = yield self.db.query(
                 """
                 SELECT *,
                     ST_X(`region_location`) AS `region_location_x`,
                     ST_Y(`region_location`) AS `region_location_y`,
-                    ST_Distance(`region_location`, point(%s, %s)) AS distance
+                    ST_Distance_Sphere(`region_location`, point(%s, %s)) AS distance
                 FROM `regions`
                 ORDER BY distance ASC;
-                """, x, y
+                """, p_long, p_lat
             )
         except common.database.DatabaseError as e:
             raise RegionError("Failed to get server: " + e.args[1])
@@ -211,14 +211,14 @@ class HostsModel(Model):
             raise RegionError("Failed to update region: " + e.args[1])
 
     @coroutine
-    def update_region_geo_location(self, region_id, x, y):
+    def update_region_geo_location(self, region_id, p_long, p_lat):
         try:
             yield self.db.execute(
                 """
                 UPDATE `regions`
                 SET `region_location`=point(%s, %s)
                 WHERE `region_id`=%s
-                """, x, y, region_id
+                """, p_long, p_lat, region_id
             )
         except common.database.DatabaseError as e:
             raise HostError("Failed to update host geo location: " + e.args[1])

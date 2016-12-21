@@ -1695,12 +1695,12 @@ class RegionController(a.AdminController):
         if geo is None:
             raise a.ActionError("Failed to lookup IP address ({0})".format(external_ip))
 
-        x, y = geo.location
+        p_lat, p_long = geo.location
 
         hosts = self.application.hosts
 
         try:
-            yield hosts.update_region_geo_location(region_id, x, y)
+            yield hosts.update_region_geo_location(region_id, p_long, p_lat)
         except HostError as e:
             raise a.ActionError(e.message)
 

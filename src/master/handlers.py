@@ -227,16 +227,16 @@ class RoomsHandler(AuthenticatedHandler):
         lock_my_region = self.get_argument("my_region_only", "false") == "true"
 
         if geo:
-            x, y = geo.location
+            p_lat, p_long = geo.location
 
             if lock_my_region:
                 try:
-                    my_region_only = yield hosts.get_closest_region(x, y)
+                    my_region_only = yield hosts.get_closest_region(p_long, p_lat)
                 except RegionNotFound:
                     pass
 
             if not my_region_only:
-                closest_regions = yield hosts.list_closest_regions(x, y)
+                closest_regions = yield hosts.list_closest_regions(p_long, p_lat)
                 ordered_regions = [region.region_id for region in closest_regions]
         else:
             ordered_regions = None
