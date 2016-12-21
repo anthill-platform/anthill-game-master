@@ -448,7 +448,10 @@ class RoomsModel(Model):
                 query.regions_order = regions_order
                 query.for_update = True
                 query.show_full = False
-                query.region_id = region
+
+                if region:
+                    query.region_id = region.region_id
+
                 query.host_active = True
 
                 room = yield query.query(db, one=True)
@@ -704,7 +707,10 @@ class RoomsModel(Model):
             query.show_full = show_full
             query.state = 'SPAWNED'
             query.host_id = host
-            query.region_id = region
+
+            if region:
+                query.region_id = region.region_id
+
             query.host_active = True
 
             rooms = yield query.query(self.db, one=False)
