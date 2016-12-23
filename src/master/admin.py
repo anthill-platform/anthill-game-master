@@ -5,7 +5,7 @@ import tornado.httpclient
 
 import common.admin as a
 from common.environment import AppNotFound
-from common.database import format_conditions_json
+from common.database import format_conditions_json, ConditionError
 
 from model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
 from model.host import HostNotFound, HostError, RegionNotFound, RegionError
@@ -1931,7 +1931,11 @@ class RoomsController(a.AdminController):
             except (KeyError, ValueError):
                 raise a.ActionError("Corrupted settings")
 
-            cond = format_conditions_json('settings', game_settings)
+            try:
+                cond = format_conditions_json('settings', game_settings)
+            except ConditionError as e:
+                raise a.ActionError(e.message)
+
             query.add_conditions(cond)
         else:
             game_settings = {}

@@ -241,12 +241,15 @@ class RoomsHandler(AuthenticatedHandler):
         else:
             ordered_regions = None
 
-        rooms = yield rooms_data.list_rooms(
-            gamespace, game_name, game_version,
-            game_server_id, settings,
-            regions_order=ordered_regions,
-            show_full=show_full,
-            region=my_region_only)
+        try:
+            rooms = yield rooms_data.list_rooms(
+                gamespace, game_name, game_version,
+                game_server_id, settings,
+                regions_order=ordered_regions,
+                show_full=show_full,
+                region=my_region_only)
+        except RoomError as e:
+            raise HTTPError(400, e.message)
 
         self.dumps({
             "rooms": [
