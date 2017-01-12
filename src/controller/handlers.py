@@ -36,6 +36,11 @@ class DeliverDeploymentHandler(AuthenticatedHandler):
         yield self.delivery.data_received(chunk)
 
     @coroutine
+    def prepare(self):
+        self.request.connection.set_max_body_size(1073741824)
+        yield super(DeliverDeploymentHandler, self).prepare()
+
+    @coroutine
     @internal
     def prepared(self, *args, **kwargs):
         game_name = self.get_argument("game_name")
