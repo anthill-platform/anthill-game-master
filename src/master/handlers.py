@@ -49,7 +49,7 @@ class InternalHandler(object):
 
 
 class JoinHandler(AuthenticatedHandler):
-    @scoped(scopes=[])
+    @scoped(scopes=["game"])
     @coroutine
     def post(self, game_name, game_server_name, game_version):
 
@@ -105,7 +105,7 @@ class JoinHandler(AuthenticatedHandler):
 
 
 class JoinRoomHandler(AuthenticatedHandler):
-    @scoped(scopes=[])
+    @scoped(scopes=["game"])
     @coroutine
     def post(self, game_name, room_id):
 
@@ -147,7 +147,7 @@ class JoinRoomHandler(AuthenticatedHandler):
 
 
 class CreateHandler(AuthenticatedHandler):
-    @scoped(scopes=[])
+    @scoped(scopes=["game"])
     @coroutine
     def post(self, game_name, game_server_name, game_version):
 
@@ -193,7 +193,7 @@ class CreateHandler(AuthenticatedHandler):
 
 
 class RoomsHandler(AuthenticatedHandler):
-    @scoped(scopes=[])
+    @scoped(scopes=["game"])
     @coroutine
     def get(self, game_name, game_server_name, game_version):
         gamespace = self.token.get(AccessToken.GAMESPACE)
