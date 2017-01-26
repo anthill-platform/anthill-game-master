@@ -72,7 +72,7 @@ class ApplicationController(a.AdminController):
                 for gs in data["game_servers"]
                 ]),
             a.links("Navigate", [
-                a.link("apps", "Go back"),
+                a.link("apps", "Go back", icon="chevron-left"),
                 a.link("rooms", "See game rooms", icon="th-large", game_name=game_name),
                 a.link("new_game_server", "Create Game Server",
                        icon="plus", game_name=game_name),
@@ -139,7 +139,7 @@ class GameServerController(a.AdminController):
                 "delete": a.method("Delete", "danger", order=2)
             }, data=data),
             a.links("Navigate", [
-                a.link("app", "Go back", record_id=self.context.get("game_name")),
+                a.link("app", "Go back", icon="chevron-left", record_id=self.context.get("game_name")),
                 a.link("new_game_server", "Clone Game Server", icon="clone",
                        game_name=self.context.get("game_name"),
                        game_server_id=self.context.get("game_server_id")),
@@ -269,7 +269,7 @@ class NewGameServerController(a.AdminController):
                 "create": a.method("Create", "primary", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("app", "Go back", record_id=self.context.get("game_name")),
+                a.link("app", "Go back", icon="chevron-left", record_id=self.context.get("game_name")),
                 a.link("https://spacetelescope.github.io/understanding-json-schema/index.html", "See docs", icon="book")
             ])
         ]
@@ -405,7 +405,7 @@ class GameServerVersionController(a.AdminController):
             }, data=data),
 
             a.links("Navigate", [
-                a.link("app_version", "Go back",
+                a.link("app_version", "Go back", icon="chevron-left",
                        app_id=self.context.get("game_name"), version_id=self.context.get("game_version"))
             ])
         ])
@@ -607,7 +607,7 @@ class ApplicationVersionController(a.AdminController):
                 a.link("deploy", "Deploy New Game Server", icon="upload",
                        game_name=self.context.get("app_id"),
                        game_version=self.context.get("version_id")),
-                a.link("app", "Go back", record_id=self.context.get("app_id"))
+                a.link("app", "Go back", icon="chevron-left", record_id=self.context.get("app_id"))
             ])
         ])
 
@@ -863,7 +863,7 @@ class ApplicationDeploymentController(a.AdminController):
             ], "primary"),
 
             a.links("Navigate", [
-                a.link("app_version", "Go back",
+                a.link("app_version", "Go back", icon="chevron-left",
                        app_id=self.context.get("game_name"),
                        version_id=self.context.get("game_version"))
             ])
@@ -1051,7 +1051,7 @@ class DeployApplicationController(a.UploadAdminController):
             )),
 
             a.links("Navigate", [
-                a.link("app_version", "Go back",
+                a.link("app_version", "Go back", icon="chevron-left",
                        app_id=self.context.get("game_name"),
                        version_id=self.context.get("game_version"))
             ])
@@ -1081,7 +1081,7 @@ class ApplicationsController(a.AdminController):
                 for app_id, app_name in data["apps"].iteritems()
                 ]),
             a.links("Navigate", [
-                a.link("index", "Go back"),
+                a.link("index", "Go back", icon="chevron-left"),
                 a.link("/environment/apps", "Manage apps", icon="link text-danger"),
             ])
         ]
@@ -1141,7 +1141,7 @@ class DebugHostController(a.AdminController):
             ], "Debug"),
             a.script("static/admin/debug_controller.js", server=self.context.get("host_id")),
             a.links("Navigate", [
-                a.link("server", "Go back", host_id=self.context.get("host_id"))
+                a.link("server", "Go back", icon="chevron-left", host_id=self.context.get("host_id"))
             ])
         ]
 
@@ -1203,7 +1203,7 @@ class NewHostController(a.AdminController):
                 "create": a.method("Create", "primary")
             }, data=data),
             a.links("Navigate", [
-                a.link("@back", "Go back")
+                a.link("@back", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1344,7 +1344,7 @@ class RegionsController(a.AdminController):
                 for region in data["regions"]
                 ]),
             a.links("Navigate", [
-                a.link("index", "Go back"),
+                a.link("index", "Go back", icon="chevron-left"),
                 a.link("new_region", "New region", "plus"),
                 a.link("hosts", "See Full Hosts List", "server")
             ])
@@ -1392,7 +1392,7 @@ class FindBanController(a.AdminController):
                 }, data=data)
             ]),
             a.links("Navigate", [
-                a.link("index", "Go back")
+                a.link("index", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1461,7 +1461,7 @@ class IssueBanController(a.AdminController):
                 "create": a.method("Create", "primary", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("bans", "Go back")
+                a.link("bans", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1528,7 +1528,7 @@ class BanController(a.AdminController):
                 "delete": a.method("Delete", "danger", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("bans", "Go back")
+                a.link("bans", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1671,7 +1671,7 @@ class RegionController(a.AdminController):
                 "update_geo": a.method("Update", "primary", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("hosts", "Go back"),
+                a.link("hosts", "Go back", icon="chevron-left"),
                 a.link("new_host", "New host", "plus",
                        region_id=self.context.get("region_id"))
             ])
@@ -1755,7 +1755,7 @@ class NewRegionController(a.AdminController):
                 "create": a.method("Create", "primary")
             }, data=data),
             a.links("Navigate", [
-                a.link("@back", "Go back")
+                a.link("@back", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1824,7 +1824,7 @@ class RoomController(a.AdminController):
                                                                    "and users will be kicked out.")
             }, data=data),
             a.links("Navigate", [
-                a.link("rooms", "Go back", game_name=game_name)
+                a.link("rooms", "Go back", icon="chevron-left", game_name=game_name)
             ])
         ]
 
@@ -2067,7 +2067,7 @@ class RoomsController(a.AdminController):
                 "filter": a.method("Filter", "primary")
             }, data=data, icon="filter"),
             a.links("Navigate", [
-                a.link("app", "Go back", record_id=game_name)
+                a.link("app", "Go back", icon="chevron-left", record_id=game_name)
             ])
         ]
 
@@ -2155,7 +2155,7 @@ class HostsController(a.AdminController):
             ], "primary", empty="No hosts to display"),
 
             a.links("Navigate", [
-                a.link("regions", "Go back")
+                a.link("regions", "Go back", icon="chevron-left")
             ])
         ]
 
