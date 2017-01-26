@@ -41,7 +41,8 @@ class DebugController(a.StreamAdminController):
     def new_server(self, server):
         yield self.rpc(self, "new_server", **DebugController.serialize_server(server))
 
-    def on_close(self):
+    @coroutine
+    def closed(self):
         self.sub.unsubscribe_all()
 
     @coroutine
