@@ -48,7 +48,7 @@ class HeartbeatModel(Model):
 
     @coroutine
     def __check_host__(self, host):
-        logging.info("Checking host {0} ({1})".format(host.host_id, host.internal_location))
+        logging.debug("Checking host {0} ({1})".format(host.host_id, host.internal_location))
 
         try:
             report = yield self.internal.get(
