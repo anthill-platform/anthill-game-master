@@ -46,7 +46,7 @@ class DebugController(a.StreamAdminController):
         self.sub.unsubscribe_all()
 
     @coroutine
-    def opened(self, **kwargs):
+    def opened(self, *args, **kwargs):
 
         servers = self.gs.get_servers()
 
