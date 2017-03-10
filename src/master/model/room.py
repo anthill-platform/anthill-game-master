@@ -45,7 +45,7 @@ class RoomAdapter(object):
 
     def dump(self):
         return {
-            "id": self.room_id,
+            "id": str(self.room_id),
             "settings": self.room_settings,
             "players": self.players,
             "location": self.location,
@@ -688,7 +688,8 @@ class RoomsModel(Model):
 
                 raise Return(result)
         except common.database.DatabaseError as e:
-            raise RoomError("Failed to leave a room: " + e.args[1])
+            # well, a dead lock is possible here, so ignore it as it happens
+            pass
 
     @coroutine
     def list_rooms(self, gamespace, game_name, game_version, game_server_id, settings,

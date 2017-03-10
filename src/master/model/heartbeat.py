@@ -56,7 +56,8 @@ class HeartbeatModel(Model):
                 "heartbeat",
                 {},
                 use_json=True,
-                discover_service=False)
+                discover_service=False,
+                timeout=5)
         except InternalError as e:
             logging.warning("Failed to heartbeat host {0}: {1}".format(
                 host.host_id, str(e)
@@ -98,10 +99,11 @@ class HeartbeatModel(Model):
                 failed = []
 
                 for host in hosts:
+                    # noinspection PyBroadException
                     try:
                         # process hosts one by one
                         report = yield self.__check_host__(host)
-                    except HeartbeatError:
+                    except:
                         failed.append(host.host_id)
                     else:
                         if report.memory > HeartbeatModel.MEMORY_OVERLOAD:

@@ -377,10 +377,47 @@
 
             this.tabs_header = $('<ul class="nav nav-tabs" data-tabs="tabs">' +
                 '<li class="active"><a href="#server_status" id="server_status_header" data-toggle="tab"></a></li>' +
+                '<li><a href="#batch" id="batch_header" data-toggle="tab"></a></li>' +
                 '</ul>').appendTo(div);
             this.tabs_content = $('<div class="tab-content">' +
                 '<div class="tab-pane active" id="server_status"></div>' +
+                '' +
                 '</div>').appendTo(div);
+
+            var batch = $('<div class="tab-pane" id="batch"></div>').appendTo(this.tabs_content);
+
+            $('<a href="#" class="btn btn-default">' +
+                '<i class="fa fa-terminal" aria-hidden="true"></i> Send A Command</a>').
+                appendTo(batch).click(function()
+            {
+                bootbox.prompt("Enter the command. It will be sent to game servers STDIN", function(result)
+                {
+                    if (result)
+                    {
+                        for (var i in zis.servers)
+                        {
+                            var server = zis.servers[i];
+
+                            if (server.status != "running")
+                                continue;
+
+                            zis.ws.request("send_stdin", {
+                                "server": server.name,
+                                "data": result
+                            }).done(function(payload)
+                            {
+                                notify_success("Command was sent!")
+                            }).fail(function(code, message, data)
+                            {
+                                notify_error("Error " + code + ": " + message)
+                            });
+                        }
+                    }
+
+                });
+
+                return false;
+            });
 
             this.status('Connecting...', 'refresh', 'info');
 

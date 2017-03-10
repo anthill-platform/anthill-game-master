@@ -170,8 +170,8 @@ class Player(object):
             self.rooms.trigger_remove_temp_reservation(self.gamespace, self.room_id, self.account_id)
 
             result.update({
-                "id": self.room_id,
-                "slot": self.record_id,
+                "id": str(self.room_id),
+                "slot": str(self.record_id),
                 "key": key
             })
 
@@ -233,8 +233,8 @@ class Player(object):
             settings = self.room.room_settings
 
         raise Return({
-            "id": self.room_id,
-            "slot": self.record_id,
+            "id": str(self.room_id),
+            "slot": str(self.record_id),
             "location": location,
             "settings": settings,
             "key": key

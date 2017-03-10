@@ -25,11 +25,12 @@ import ujson
 
 class BufferedLog(object):
     COLLECT_TIME = 2
+    MAX_LOG_LINES = 512
 
     def __init__(self, callback):
         self.buffer = []
         self.callback = callback
-        self.log = u""
+        self.log = []
 
     def add(self, data):
         if not self.buffer:
@@ -38,35 +39,20 @@ class BufferedLog(object):
         self.buffer.append(unicode(data))
 
     def get_log(self):
-        return self.log
+        return u"".join(self.log)
 
     def flush(self):
         if self.buffer:
             data = u"\n".join(self.buffer) + u"\n"
-            self.log += data
+            self.log.append(data)
+
+            log_length = len(self.log)
+            if log_length > BufferedLog.MAX_LOG_LINES + 16:
+                to_delete = log_length - BufferedLog.MAX_LOG_LINES
+                del self.log[:to_delete]
+
             self.callback(data)
             self.buffer = []
-
-
-class LineStream:
-    def __init__(self):
-        self.stream = u""
-
-    def add(self, data, callback):
-
-        if data is "":
-            return
-
-        self.stream += data
-
-        while True:
-            index = self.stream.find(u"\n")
-            if index >= 0:
-                string = self.stream[:index]
-                self.stream = self.stream[index + 1:]
-                callback(string.replace(u"\n", u"<br>"))
-            else:
-                break
 
 
 class SpawnError(Exception):
@@ -121,8 +107,6 @@ class GameServer(object):
         self.read_cb = PeriodicCallback(self.__recv__, GameServer.READ_PERIOD_MS)
         self.check_cb = PeriodicCallback(self.__check__, check_period)
 
-        self.str_data = LineStream()
-        self.err_data = LineStream()
         self.log = BufferedLog(self.__flush_log__)
 
     def is_running(self):
@@ -356,8 +340,13 @@ class GameServer(object):
         if self.status == GameServer.STATUS_STOPPED:
             return
 
-        self.err_data.add(self.pipe.readerr(), self.__notify__)
-        self.str_data.add(self.pipe.read(), self.__notify__)
+        err_data = self.pipe.readerr()
+        if err_data:
+            self.__notify__(err_data)
+
+        str_data = self.pipe.read()
+        if str_data:
+            self.__notify__(str_data)
 
         poll = self.pipe.wait(os.WNOHANG)
         if poll:

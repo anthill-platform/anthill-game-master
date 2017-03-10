@@ -175,7 +175,7 @@ class GameServerController(a.AdminController):
             record_id=game_name)
 
     @coroutine
-    def update(self, game_server_name, schema, max_players, game_settings, server_settings):
+    def update(self, game_server_name, schema, max_players, game_settings, server_settings, **ignored):
 
         game_server_id = self.context.get("game_server_id")
         game_name = self.context.get("game_name")
@@ -278,7 +278,7 @@ class NewGameServerController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def create(self, game_server_name, schema, max_players, game_settings):
+    def create(self, game_server_name, schema, max_players, game_settings, **ignored):
 
         game_name = self.context.get("game_name")
 

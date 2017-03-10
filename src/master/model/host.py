@@ -107,7 +107,7 @@ class HostsModel(Model):
                 """
                 SELECT *
                 FROM `hosts`
-                WHERE `host_region`=%s AND `host_state`='ACTIVE'
+                WHERE `host_region`=%s AND `host_enabled`=1 AND `host_state`='ACTIVE'
                 ORDER BY `host_load` ASC
                 LIMIT 1;
                 """, region_id

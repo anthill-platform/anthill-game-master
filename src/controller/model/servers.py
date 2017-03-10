@@ -121,8 +121,9 @@ class GameServersModel(Model):
         self.pub.notify("server_removed", server=instance)
 
         def remove_server():
-            s = self.servers.pop(instance.name)
-            self.servers_rooms.pop(s.room.id())
+            s = self.servers.pop(instance.name, None)
+            if s:
+                self.servers_rooms.pop(s.room.id())
 
         tornado.ioloop.IOLoop.current().add_timeout(datetime.timedelta(minutes=10), remove_server)
 
