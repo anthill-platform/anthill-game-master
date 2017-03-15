@@ -367,7 +367,8 @@ class RoomsModel(Model):
                     """, gamespace, key, room_id
                 )
         except common.database.DatabaseError as e:
-            raise RoomError("Failed to leave a room: " + e.args[1])
+            # well, a dead lock is possible here, so ignore it as it happens
+            pass
 
     @coroutine
     def assign_location(self, gamespace, room_id, location):
