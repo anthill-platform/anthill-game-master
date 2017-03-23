@@ -2,6 +2,8 @@
 
 from tornado.gen import coroutine, Return, sleep, with_timeout, Task, TimeoutError
 from tornado.ioloop import PeriodicCallback
+from tornado.concurrent import run_on_executor
+from concurrent.futures import ThreadPoolExecutor
 
 import tornado.ioloop
 
@@ -18,6 +20,7 @@ import common.discover
 
 from common.discover import DiscoveryError
 from common.internal import Internal, InternalError
+from common import retry, SyncTimeout
 from room import NotifyError
 
 import ujson
@@ -69,8 +72,11 @@ class GameServer(object):
     STATUS_NONE = "none"
 
     SPAWN_TIMEOUT = 30
+    TERMINATE_TIMEOUT = 5
     CHECK_PERIOD = 60
     READ_PERIOD_MS = 200
+
+    executor = ThreadPoolExecutor(max_workers=4)
 
     def __init__(self, gs, game_name, game_version, game_server_name, deployment, name, room):
         self.gs = gs
@@ -125,7 +131,7 @@ class GameServer(object):
             self.check_cb.stop()
             return
 
-        tornado.ioloop.IOLoop.current().spawn_callback(self.__check_status__)
+        tornado.ioloop.IOLoop.current().add_callback(self.__check_status__)
 
     @coroutine
     def __check_status__(self):
@@ -315,18 +321,36 @@ class GameServer(object):
     def send_stdin(self, data):
         self.pipe.write(data.encode('ascii', 'ignore') + "\n")
 
+    # noinspection PyBroadException
+    @run_on_executor
+    def __kill__(self, code):
+        try:
+            self.pipe.kill(code)
+        except Exception as e:
+            return str(e)
+        else:
+            return None
+
     @coroutine
     def terminate(self, kill=False):
         self.__notify__(u"Terminating... (kill={0})".format(kill))
 
+        kill_proc = self.__kill__(signal.SIGKILL if kill else signal.SIGTERM)
+
         try:
-            self.pipe.kill(signal.SIGKILL if kill else signal.SIGTERM)
-        except OSError as e:
-            self.__notify__(u"Server terminate error: " + e.args[1])
+            error = yield with_timeout(datetime.timedelta(seconds=GameServer.TERMINATE_TIMEOUT), kill_proc)
+        except TimeoutError:
+            self.__notify__(u"Terminate timeout.")
+
             if kill:
                 yield self.__stopped__()
             else:
                 yield self.terminate(kill=True)
+        else:
+            if error:
+                self.__notify__(u"Failed to terminate: " + str(error))
+            else:
+                self.__notify__(u"Terminated successfully.")
 
         self.log.flush()
 
@@ -348,15 +372,20 @@ class GameServer(object):
         if str_data:
             self.__notify__(str_data)
 
-        poll = self.pipe.wait(os.WNOHANG)
-        if poll:
+        try:
+            with SyncTimeout(5):
+                poll = self.pipe.wait(os.WNOHANG)
+        except SyncTimeout.TimeoutError:
             self.__recv_stop__()
+        else:
+            if poll:
+                self.__recv_stop__()
 
     def __recv_stop__(self):
         self.read_cb.stop()
         self.check_cb.stop()
 
-        self.ioloop.spawn_callback(self.__stopped__)
+        self.ioloop.add_callback(self.__stopped__)
 
     @coroutine
     def crashed(self, reason):
