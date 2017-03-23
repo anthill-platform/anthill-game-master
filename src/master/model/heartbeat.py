@@ -73,54 +73,54 @@ class HeartbeatModel(Model):
 
             # get list of the hosts, and lock them temporarily
 
-            hosts = yield db.query(
-                """
-                    SELECT * FROM `hosts`
-                    WHERE `host_enabled`=1 AND `host_processing`=0
-                    FOR UPDATE;
-                """)
-
-            hosts = map(HostAdapter, hosts)
-
-            if hosts:
-                ids = [host.host_id for host in hosts]
-
-                # mark hosts as 'being processed'
-                yield db.execute(
+            try:
+                hosts = yield db.query(
                     """
-                        UPDATE `hosts`
-                        SET `host_processing`=1
-                        WHERE `host_id` IN %s;
-                    """, ids)
+                        SELECT * FROM `hosts`
+                        WHERE `host_enabled`=1 AND `host_processing`=0
+                        FOR UPDATE;
+                    """)
 
-                yield db.commit()
-                yield db.autocommit(True)
+                hosts = map(HostAdapter, hosts)
 
-                failed = []
+                if hosts:
+                    ids = [host.host_id for host in hosts]
 
-                for host in hosts:
-                    # noinspection PyBroadException
-                    try:
-                        # process hosts one by one
-                        report = yield self.__check_host__(host)
-                    except:
-                        failed.append(host.host_id)
-                    else:
-                        if report.memory > HeartbeatModel.MEMORY_OVERLOAD:
-                            state = 'OVERLOAD'
-                        else:
-                            state = 'ACTIVE'
-
-                        # update load in case of success
-                        yield self.app.hosts.update_host_load(host.host_id, report.memory, report.cpu, state, db=db)
-
-                        # delete rooms not listed in that list
-                        yield self.app.rooms.remove_host_rooms(host.host_id, except_rooms=report.rooms)
-
-                if failed:
+                    # mark hosts as 'being processed'
                     yield db.execute(
                         """
                             UPDATE `hosts`
-                            SET `host_processing`=0, `host_state`='ERROR'
+                            SET `host_processing`=1
                             WHERE `host_id` IN %s;
-                        """, failed)
+                        """, ids)
+
+                    failed = []
+
+                    for host in hosts:
+                        # noinspection PyBroadException
+                        try:
+                            # process hosts one by one
+                            report = yield self.__check_host__(host)
+                        except:
+                            failed.append(host.host_id)
+                        else:
+                            if report.memory > HeartbeatModel.MEMORY_OVERLOAD:
+                                state = 'OVERLOAD'
+                            else:
+                                state = 'ACTIVE'
+
+                            # update load in case of success
+                            yield self.app.hosts.update_host_load(host.host_id, report.memory, report.cpu, state, db=db)
+
+                            # delete rooms not listed in that list
+                            yield self.app.rooms.remove_host_rooms(host.host_id, except_rooms=report.rooms)
+
+                    if failed:
+                        yield db.execute(
+                            """
+                                UPDATE `hosts`
+                                SET `host_processing`=0, `host_state`='ERROR'
+                                WHERE `host_id` IN %s;
+                            """, failed)
+            finally:
+                yield db.commit()

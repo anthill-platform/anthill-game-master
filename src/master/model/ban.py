@@ -2,6 +2,7 @@
 from tornado.gen import coroutine, Return
 import common.database
 from common.model import Model
+from common.validate import validate
 
 
 class BanError(Exception):
@@ -170,6 +171,41 @@ class BansModel(Model):
             raise Return(None)
 
         raise Return(BanAdapter(ban))
+
+    @coroutine
+    @validate(gamespace="int", accounts="json_list_of_ints", ips="json_list_of_strings")
+    def find_bans(self, gamespace, accounts, ips):
+        """
+        Returns a list of accounts that are banned for a list of input accounts/ips
+        :param gamespace: A gamespace to check in
+        :param accounts: a list of account id's to check
+        :param ips: a list of ip aderssed to check
+        :return:
+        """
+
+        if not accounts or not ips:
+            raise BanError("accounts or ips is empty")
+
+        try:
+            bans = yield self.db.query(
+                """
+                SELECT `ban_account`
+                FROM `bans`
+                WHERE `ban_gamespace`=%s
+                    AND (`ban_account` IN %s OR `ban_ip` IN %s)
+                    AND `ban_expires` > NOW()
+                LIMIT 1;
+                """, gamespace, accounts, ips
+            )
+        except common.database.DatabaseError as e:
+            raise BanError("Failed to get server: " + e.args[1])
+
+        result = [
+            ban["ban_account"]
+            for ban in bans
+        ]
+
+        raise Return(result)
 
     @coroutine
     def delete_ban(self, gamespace, ban_id):

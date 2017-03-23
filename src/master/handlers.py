@@ -1,4 +1,3 @@
-
 import ujson
 
 from tornado.gen import coroutine, Return
@@ -9,7 +8,7 @@ from common.handler import AuthenticatedHandler
 
 from model.host import RegionNotFound, HostNotFound, HostError
 from model.controller import ControllerError
-from model.player import Player, RoomNotFound, PlayerError, RoomError, PlayerBanned
+from model.player import Player, PlayersGroup, RoomNotFound, PlayerError, RoomError, PlayerBanned
 from model.gameserver import GameServerNotFound
 from common.internal import InternalError
 
@@ -104,6 +103,61 @@ class JoinHandler(AuthenticatedHandler):
         self.dumps(result)
 
 
+class JoinMultiHandler(AuthenticatedHandler):
+    @scoped(scopes=["game", "game_multi"])
+    @coroutine
+    def post(self, game_name, game_server_name, game_version):
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            settings = ujson.loads(self.get_argument("settings", "{}"))
+            create_settings = ujson.loads(self.get_argument("create_settings", "{}"))
+            accounts = ujson.loads(self.get_argument("accounts"))
+        except ValueError:
+            raise HTTPError(400, "Corrupted JSON")
+
+        lock_my_region = self.get_argument("my_region_only", "false") == "true"
+        auto_create = self.get_argument("auto_create", "true") == "true"
+
+        if not isinstance(accounts, list):
+            raise HTTPError(400, "Accounts should be a list")
+
+        ip = self.get_argument("ip", None)
+
+        if ip:
+            if not isinstance(ip, (str, unicode)):
+                raise HTTPError(400, "ip is not a string")
+        else:
+            ip = remote_ip(self.request)
+
+        if ip is None:
+            raise HTTPError(400, "Bad IP")
+
+        players = PlayersGroup(self.application, gamespace, game_name, game_version,
+                               game_server_name, accounts, ip)
+
+        try:
+            yield players.init()
+        except PlayerError as e:
+            raise HTTPError(e.code, e.message)
+        except GameServerNotFound:
+            raise HTTPError(404, "No such game server")
+
+        try:
+            results = yield players.join(
+                settings,
+                auto_create=auto_create,
+                create_room_settings=create_settings,
+                lock_my_region=lock_my_region)
+        except RoomNotFound as e:
+            raise HTTPError(404, "No such room found")
+        except PlayerError as e:
+            raise HTTPError(e.code, e.message)
+
+        self.dumps(results)
+
+
 class JoinRoomHandler(AuthenticatedHandler):
     @scoped(scopes=["game"])
     @coroutine
@@ -120,7 +174,6 @@ class JoinRoomHandler(AuthenticatedHandler):
         ban = yield self.application.bans.lookup_ban(gamespace, account, ip)
 
         if ban:
-
             logging.info("Banned user trying to join a game: @{0} ban {1}".format(ban.account, ban.ban_id))
 
             self.set_header("X-Ban-Until", ban.expires)
@@ -173,12 +226,58 @@ class CreateHandler(AuthenticatedHandler):
             ban = e.ban
 
             logging.info("Banned user trying to join a game: @{0} ban {1}".format(ban.account, ban.ban_id))
-            
+
             self.set_header("X-Ban-Until", ban.expires)
             self.set_header("X-Ban-Id", ban.ban_id)
             self.set_header("X-Ban-Reason", ban.reason)
             self.set_status(423, "You have been banned until: " + str(ban.expires))
             return
+        except PlayerError as e:
+            raise HTTPError(e.code, e.message)
+        except GameServerNotFound:
+            raise HTTPError(404, "No such game server")
+
+        try:
+            result = yield player.create(settings)
+        except PlayerError as e:
+            raise HTTPError(e.code, e.message)
+
+        self.dumps(result)
+
+
+class CreateMultiHandler(AuthenticatedHandler):
+    @scoped(scopes=["game", "game_multi"])
+    @coroutine
+    def post(self, game_name, game_server_name, game_version):
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            settings = ujson.loads(self.get_argument("settings", "{}"))
+            accounts = ujson.loads(self.get_argument("accounts"))
+        except ValueError:
+            raise HTTPError(400, "Corrupted JSON")
+
+        ip = self.get_argument("ip", None)
+
+        if ip:
+            if not isinstance(ip, (str, unicode)):
+                raise HTTPError(400, "ip is not a string")
+        else:
+            ip = remote_ip(self.request)
+
+        if ip is None:
+            raise HTTPError(400, "Bad IP")
+
+        if not isinstance(accounts, list):
+            raise HTTPError(400, "Accounts should be a list")
+
+        player = PlayersGroup(
+            self.application, gamespace, game_name, game_version,
+            game_server_name, accounts, ip)
+
+        try:
+            yield player.init()
         except PlayerError as e:
             raise HTTPError(e.code, e.message)
         except GameServerNotFound:

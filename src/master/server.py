@@ -107,7 +107,9 @@ class GameMasterServer(common.server.Server):
         return [
             (r"/rooms/(.*)/(.*)/(.*)", h.RoomsHandler),
             (r"/room/(.*)/(.*)/join", h.JoinRoomHandler),
+            (r"/join/multi/(.*)/(.*)/(.*)", h.JoinMultiHandler),
             (r"/join/(.*)/(.*)/(.*)", h.JoinHandler),
+            (r"/create/multi/(.*)/(.*)/(.*)", h.CreateMultiHandler),
             (r"/create/(.*)/(.*)/(.*)", h.CreateHandler),
             (r"/status", h.StatusHandler)
         ]

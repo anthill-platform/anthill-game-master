@@ -1,4 +1,3 @@
-
 import ujson
 import logging
 
@@ -71,6 +70,7 @@ class RoomQuery(object):
         self.regions_order = None
         self.limit = 0
         self.offset = 0
+        self.free_slots = 1
         self.other_conditions = []
         self.for_update = False
         self.host_active = False
@@ -109,8 +109,9 @@ class RoomQuery(object):
             conditions.append("`rooms`.`state`=%s")
             data.append(self.state)
 
-        if not self.show_full:
-            conditions.append("`rooms`.`players`<`rooms`.`max_players`")
+        if not self.show_full and self.free_slots:
+            conditions.append("`rooms`.`players` + %s <= `rooms`.`max_players`")
+            data.append(self.free_slots)
 
         if self.host_id:
             conditions.append("`rooms`.`host_id`=%s")
@@ -228,7 +229,6 @@ class RoomQuery(object):
 
 
 class RoomsModel(Model):
-
     AUTO_REMOVE_TIME = 30
 
     @staticmethod
@@ -236,13 +236,13 @@ class RoomsModel(Model):
         return str(gamespace_id) + "_" + str(account_id) + "_" + random_string(32)
 
     @coroutine
-    def __inc_players_num__(self, room_id, db):
+    def __inc_players_num__(self, gamespace_id, room_id, db, amount=1):
         yield db.execute(
             """
             UPDATE `rooms` r
-            SET `players`=`players`+1
-            WHERE `room_id`=%s
-            """, room_id
+            SET `players`=`players` + %s
+            WHERE `gamespace_id`=%s AND `room_id`=%s;
+            """, amount, gamespace_id, room_id
         )
 
     def get_setup_db(self):
@@ -288,6 +288,9 @@ class RoomsModel(Model):
 
         raise Return(record_id)
 
+    def trigger_remove_temp_reservation_multi(self, gamespace, room_id, accounts):
+        IOLoop.current().spawn_callback(self.__remove_temp_reservation_multi__, gamespace, room_id, accounts)
+
     def trigger_remove_temp_reservation(self, gamespace, room_id, account_id):
         IOLoop.current().spawn_callback(self.__remove_temp_reservation__, gamespace, room_id, account_id)
 
@@ -318,6 +321,18 @@ class RoomsModel(Model):
             logging.warning("Removed player reservation: room '{0}' player '{1}' gamespace '{2}'".format(
                 room_id, account_id, gamespace
             ))
+
+    @coroutine
+    def __remove_temp_reservation_multi__(self, gamespace, room_id, accounts):
+        """
+        Called asynchronously when users joined the room
+        Waits a while, and then leaves the room, if the join reservation
+            was not approved by game-controller.
+        """
+
+        # wait a while
+        yield sleep(RoomsModel.AUTO_REMOVE_TIME)
+        yield self.leave_room_reservation_multi(gamespace, room_id, accounts)
 
     @coroutine
     def approve_join(self, gamespace, room_id, key):
@@ -390,8 +405,9 @@ class RoomsModel(Model):
             raise Return(room_id)
 
     @coroutine
-    def create_and_join_room(self, gamespace, game_name, game_version, gs, room_settings,
-                             account_id, access_token, host, deployment_id, trigger_remove=True):
+    def create_and_join_room(
+            self, gamespace, game_name, game_version, gs, room_settings,
+            account_id, access_token, host, deployment_id, trigger_remove=True):
 
         max_players = gs.max_players
 
@@ -415,6 +431,114 @@ class RoomsModel(Model):
             raise RoomError("Failed to create a room: " + e.args[1])
         else:
             raise Return((record_id, key, room_id))
+
+    @coroutine
+    def create_and_join_room_multi(
+            self, gamespace, game_name, game_version, gs, room_settings,
+            tokens, host, deployment_id, trigger_remove=True):
+
+        max_players = gs.max_players
+
+        try:
+            with (yield self.db.acquire()) as db:
+
+                room_id = yield db.insert(
+                    """
+                    INSERT INTO `rooms`
+                    (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
+                      `max_players`, `location`, `settings`, `state`, `host_id`, `region_id`, `deployment_id`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE', %s, %s, %s)
+                    """, gamespace, game_name, game_version, gs.game_server_id, len(tokens), max_players,
+                    "{}", ujson.dumps(room_settings), host.host_id, host.region, deployment_id
+                )
+
+                data = []
+                scheme = []
+                keys = {}
+
+                for token in tokens:
+                    key = RoomsModel.__generate_key__(gamespace, token.account)
+                    keys[token.account] = key
+                    data.extend([gamespace, token.account, room_id, host.host_id, key, token.key])
+                    scheme.append('(%s, %s, %s, %s, %s, %s)')
+
+                query_string = """
+                    INSERT INTO `players`
+                    (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`)
+                    VALUES {0};
+                    """.format(",".join(scheme))
+
+                first_record_id = yield db.insert(query_string, *data)
+
+                result = {
+                    token.account : (record_id, keys[token.account])
+                    for record_id, token in enumerate(tokens, first_record_id)
+                }
+
+                if trigger_remove:
+                    accounts = [token.account for token in tokens]
+                    self.trigger_remove_temp_reservation_multi(gamespace, room_id, accounts)
+
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to create a room: " + e.args[1])
+        else:
+            raise Return((result, room_id))
+
+    @coroutine
+    def find_and_join_room_multi(
+            self, gamespace, game_name, game_version, game_server_id,
+            tokens, settings, regions_order=None, region=None):
+
+        """
+        Find the room and join into it, if any
+        :param gamespace: the gamespace
+        :param game_name: the game ID (string)
+        :param game_version: the game's version (string, like 1.0)
+        :param game_server_id: game server configuration id
+        :param tokens: active tokens of the players
+        :param settings: room specific filters, defined like so:
+                {"filterA": 5, "filterB": true, "filterC": {"@func": ">", "@value": 10}}
+        :param regions_order: a list of region id's to order result around
+        :param region: an id of the region the search should be locked around
+        :returns a pair records (see __join_room_multi__) and room info
+        """
+        try:
+            conditions = common.database.format_conditions_json('settings', settings)
+        except common.database.ConditionError as e:
+            raise RoomError(e.message)
+
+        try:
+            with (yield self.db.acquire(auto_commit=False)) as db:
+
+                query = RoomQuery(gamespace, game_name, game_version, game_server_id)
+
+                query.add_conditions(conditions)
+                query.regions_order = regions_order
+                query.for_update = True
+                query.free_slots = len(tokens)
+                query.show_full = False
+
+                if region:
+                    query.region_id = region.region_id
+
+                query.host_active = True
+
+                room = yield query.query(db, one=True)
+
+                if room is None:
+                    yield db.commit()
+                    raise RoomNotFound()
+
+                room_id = room.room_id
+
+                # at last, join into the player list
+                records = yield self.__join_room_multi__(
+                    gamespace, room_id, room.host_id, tokens, db)
+
+                raise Return((records, room))
+
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to join a room: " + e.args[1])
 
     @coroutine
     def find_and_join_room(self, gamespace, game_name, game_version, game_server_id,
@@ -631,6 +755,58 @@ class RoomsModel(Model):
         raise Return(result)
 
     @coroutine
+    def __join_room_multi__(self, gamespace, room_id, host_id, tokens, db):
+        """
+        Joins a bulk of players to the room. A slot for each token is guaranteed
+
+        :param gamespace: the gamespace
+        :param room_id: a room to join to
+        :param tokens: tokens of the players to join to a room
+        :param db: a reference to database instance
+
+        :returns a dict of pairs of record id and a key {1: (record_id, key), 2: (record_id, key), ...},
+                 the key is a corresponding player's account
+        """
+
+        try:
+            # increment player count (virtually)
+            yield self.__inc_players_num__(gamespace, room_id, db, len(tokens))
+            yield db.commit()
+
+            data = []
+            scheme = []
+            keys = {}
+
+            for token in tokens:
+                key = RoomsModel.__generate_key__(gamespace, token.account)
+                keys[token.account] = key
+                data.extend([gamespace, token.account, room_id, host_id, key, token.key])
+                scheme.append('(%s, %s, %s, %s, %s, %s)')
+
+            first_record_id = yield db.insert(
+                """
+                INSERT INTO `players`
+                (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`)
+                VALUES {0};
+                """.format(",".join(scheme)), *data
+            )
+
+            result = {
+                token.account : (record_id, keys[token.account])
+                for record_id, token in enumerate(tokens, first_record_id)
+            }
+
+            accounts = [token.account for token in tokens]
+            self.trigger_remove_temp_reservation_multi(gamespace, room_id, accounts)
+
+            yield db.commit()
+
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to join a room: " + e.args[1])
+
+        raise Return(result)
+
+    @coroutine
     def __join_room__(self, gamespace, room_id, host_id, account_id, access_token, db):
         """
         Joins the player to the room
@@ -638,7 +814,7 @@ class RoomsModel(Model):
         :param room_id: a room to join to
         :param account_id: account of the player
         :param access_token: active player's access token
-        :param db: a reference to database instance (optional)
+        :param db: a reference to database instance
 
         :returns a pair of record id and a key (an unique string to find the record by)
         """
@@ -647,7 +823,7 @@ class RoomsModel(Model):
 
         try:
             # increment player count (virtually)
-            yield self.__inc_players_num__(room_id, db)
+            yield self.__inc_players_num__(gamespace, room_id, db)
             yield db.commit()
 
             record_id = yield self.__insert_player__(
@@ -677,6 +853,22 @@ class RoomsModel(Model):
                 yield self.remove_room(gamespace, room_id)
 
     @coroutine
+    def leave_room_multi(self, gamespace, room_id, accounts, remove_room=False):
+        try:
+            with (yield self.db.acquire()) as db:
+                yield db.execute(
+                    """
+                    DELETE FROM `players`
+                    WHERE `gamespace_id`=%s AND `account_id` IN %s AND `room_id`=%s;
+                    """, gamespace, accounts, room_id
+                )
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to leave a room: " + e.args[1])
+        finally:
+            if remove_room:
+                yield self.remove_room(gamespace, room_id)
+
+    @coroutine
     def leave_room_reservation(self, gamespace, room_id, account_id):
         try:
             with (yield self.db.acquire()) as db:
@@ -685,6 +877,22 @@ class RoomsModel(Model):
                     DELETE FROM `players`
                     WHERE `gamespace_id`=%s AND `account_id`=%s AND `room_id`=%s AND `state`='RESERVED';
                     """, gamespace, account_id, room_id
+                )
+
+                raise Return(result)
+        except common.database.DatabaseError as e:
+            # well, a dead lock is possible here, so ignore it as it happens
+            pass
+
+    @coroutine
+    def leave_room_reservation_multi(self, gamespace, room_id, accounts):
+        try:
+            with (yield self.db.acquire()) as db:
+                result = yield db.execute(
+                    """
+                    DELETE FROM `players`
+                    WHERE `gamespace_id`=%s AND `account_id` IN %s AND `room_id`=%s AND `state`='RESERVED';
+                    """, gamespace, accounts, room_id
                 )
 
                 raise Return(result)
