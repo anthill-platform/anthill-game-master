@@ -36,6 +36,7 @@ class HeartbeatModel(Model):
         self.db = db
         self.update_cb = PeriodicCallback(self.update, options.heartbeat_time * 1000)
         self.internal = Internal()
+        self.processing = False
 
     @coroutine
     def started(self):
@@ -68,6 +69,11 @@ class HeartbeatModel(Model):
 
     @coroutine
     def update(self):
+
+        if self.processing:
+            return
+
+        self.processing = True
 
         with (yield self.db.acquire(auto_commit=False)) as db:
 
@@ -124,3 +130,4 @@ class HeartbeatModel(Model):
                             """, failed)
             finally:
                 yield db.commit()
+                self.processing = False

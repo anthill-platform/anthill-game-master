@@ -470,6 +470,8 @@ class RoomsModel(Model):
 
                 first_record_id = yield db.insert(query_string, *data)
 
+                yield db.commit()
+
                 result = {
                     token.account : (record_id, keys[token.account])
                     for record_id, token in enumerate(tokens, first_record_id)
@@ -790,6 +792,7 @@ class RoomsModel(Model):
                 VALUES {0};
                 """.format(",".join(scheme)), *data
             )
+            yield db.commit()
 
             result = {
                 token.account : (record_id, keys[token.account])
@@ -828,6 +831,7 @@ class RoomsModel(Model):
 
             record_id = yield self.__insert_player__(
                 gamespace, account_id, room_id, host_id, key, access_token, db, True)
+            yield db.commit()
 
             yield db.commit()
 
