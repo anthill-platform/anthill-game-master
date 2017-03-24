@@ -168,7 +168,7 @@ class Player(object):
 
                 yield self.rooms.update_room_settings(self.gamespace, self.room_id, room_settings)
 
-            self.rooms.trigger_remove_temp_reservation(self.gamespace, self.room_id, self.account_id)
+            self.rooms.trigger_remove_temp_reservation(self.record_id)
 
             result.update({
                 "id": str(self.room_id),

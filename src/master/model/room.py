@@ -284,15 +284,15 @@ class RoomsModel(Model):
         )
 
         if trigger_remove:
-            self.trigger_remove_temp_reservation(gamespace, room_id, account_id)
+            self.trigger_remove_temp_reservation(record_id)
 
         raise Return(record_id)
 
     def trigger_remove_temp_reservation_multi(self, gamespace, room_id, accounts):
         IOLoop.current().spawn_callback(self.__remove_temp_reservation_multi__, gamespace, room_id, accounts)
 
-    def trigger_remove_temp_reservation(self, gamespace, room_id, account_id):
-        IOLoop.current().spawn_callback(self.__remove_temp_reservation__, gamespace, room_id, account_id)
+    def trigger_remove_temp_reservation(self, record):
+        IOLoop.current().spawn_callback(self.__remove_temp_reservation__, record)
 
     @coroutine
     def __update_players_num__(self, room_id, db):
@@ -305,7 +305,7 @@ class RoomsModel(Model):
         )
 
     @coroutine
-    def __remove_temp_reservation__(self, gamespace, room_id, account_id):
+    def __remove_temp_reservation__(self, record_id):
         """
         Called asynchronously when user joined the room
         Waits a while, and then leaves the room, if the join reservation
@@ -315,11 +315,11 @@ class RoomsModel(Model):
         # wait a while
         yield sleep(RoomsModel.AUTO_REMOVE_TIME)
 
-        result = yield self.leave_room_reservation(gamespace, room_id, account_id)
+        result = yield self.leave_room_reservation(record_id)
 
         if result:
-            logging.warning("Removed player reservation: room '{0}' player '{1}' gamespace '{2}'".format(
-                room_id, account_id, gamespace
+            logging.warning("Removed player reservation: {0}".format(
+                record_id
             ))
 
     @coroutine
@@ -344,32 +344,34 @@ class RoomsModel(Model):
                     SELECT `access_token`, `record_id`
                     FROM `players`
                     WHERE `gamespace_id`=%s AND `room_id`=%s AND `key`=%s
+                    LIMIT 1
                     FOR UPDATE;
                     """, gamespace, room_id, key
                 )
             except common.database.DatabaseError as e:
                 raise RoomError("Failed to approve a join: " + e.args[1])
+            else:
+                if select is None:
+                    raise ApproveFailed()
 
-            if select is None:
-                raise ApproveFailed()
+                record_id = select["record_id"]
+                access_token = select["access_token"]
 
-            record_id = select["record_id"]
-            access_token = select["access_token"]
+                try:
+                    yield db.execute(
+                        """
+                        UPDATE `players`
+                        SET `state`='JOINED'
+                        WHERE `gamespace_id`=%s AND `record_id`=%s
+                        LIMIT 1;
+                        """, gamespace, record_id
+                    )
+                except common.database.DatabaseError as e:
+                    raise RoomError("Failed to approve a join: " + e.args[1])
 
-            try:
-                yield db.execute(
-                    """
-                    UPDATE `players`
-                    SET `state`='JOINED'
-                    WHERE `gamespace_id`=%s AND `record_id`=%s;
-                    """, gamespace, record_id
-                )
+                raise Return(access_token)
+            finally:
                 yield db.commit()
-
-            except common.database.DatabaseError as e:
-                raise RoomError("Failed to approve a join: " + e.args[1])
-
-            raise Return(access_token)
 
     @coroutine
     def approve_leave(self, gamespace, room_id, key):
@@ -874,21 +876,19 @@ class RoomsModel(Model):
                 yield self.remove_room(gamespace, room_id)
 
     @coroutine
-    def leave_room_reservation(self, gamespace, room_id, account_id):
-        try:
-            with (yield self.db.acquire()) as db:
+    def leave_room_reservation(self, record_id):
+        with (yield self.db.acquire()) as db:
+            try:
                 result = yield db.execute(
                     """
                     DELETE FROM `players`
-                    WHERE `gamespace_id`=%s AND `account_id`=%s AND `room_id`=%s AND `state`='RESERVED'
+                    WHERE `record_id`=%s AND `state`='RESERVED'
                     LIMIT 1;
-                    """, gamespace, account_id, room_id
-                )
-
+                    """, record_id)
+            except common.database.DatabaseError as e:
+                raise Return(False)
+            else:
                 raise Return(result)
-        except common.database.DatabaseError as e:
-            # well, a dead lock is possible here, so ignore it as it happens
-            pass
 
     @coroutine
     def leave_room_reservation_multi(self, gamespace, room_id, accounts):
