@@ -847,7 +847,8 @@ class RoomsModel(Model):
                 yield db.execute(
                     """
                     DELETE FROM `players`
-                    WHERE `gamespace_id`=%s AND `account_id`=%s AND `room_id`=%s;
+                    WHERE `gamespace_id`=%s AND `account_id`=%s AND `room_id`=%s
+                    LIMIT 1;
                     """, gamespace, account_id, room_id
                 )
         except common.database.DatabaseError as e:
@@ -879,7 +880,8 @@ class RoomsModel(Model):
                 result = yield db.execute(
                     """
                     DELETE FROM `players`
-                    WHERE `gamespace_id`=%s AND `account_id`=%s AND `room_id`=%s AND `state`='RESERVED';
+                    WHERE `gamespace_id`=%s AND `account_id`=%s AND `room_id`=%s AND `state`='RESERVED'
+                    LIMIT 1;
                     """, gamespace, account_id, room_id
                 )
 
