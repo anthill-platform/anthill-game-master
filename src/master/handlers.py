@@ -6,7 +6,7 @@ from tornado.web import HTTPError
 from common.access import scoped, internal, AccessToken, remote_ip
 from common.handler import AuthenticatedHandler
 
-from model.host import RegionNotFound, HostNotFound, HostError
+from model.host import RegionNotFound, HostNotFound, HostError, RegionError
 from model.controller import ControllerError
 from model.player import Player, PlayersGroup, RoomNotFound, PlayerError, RoomError, PlayerBanned
 from model.gameserver import GameServerNotFound
@@ -70,6 +70,7 @@ class JoinHandler(AuthenticatedHandler):
                         game_server_name, account, self.token.key, ip)
 
         lock_my_region = self.get_argument("my_region_only", "false") == "true"
+        selected_region = self.get_argument("region", None)
         auto_create = self.get_argument("auto_create", "true") == "true"
 
         try:
@@ -94,7 +95,8 @@ class JoinHandler(AuthenticatedHandler):
                 settings,
                 auto_create=auto_create,
                 create_room_settings=create_settings,
-                lock_my_region=lock_my_region)
+                lock_my_region=lock_my_region,
+                selected_region=selected_region)
         except RoomNotFound as e:
             raise HTTPError(404, "No such room found")
         except PlayerError as e:
@@ -310,35 +312,42 @@ class RoomsHandler(AuthenticatedHandler):
 
         game_server_id = gs.game_server_id
 
-        ip = remote_ip(self.request)
-
-        if ip is None:
-            raise HTTPError(400, "Bad IP")
-
-        geo = geolite2.lookup(ip)
-
         rooms_data = self.application.rooms
         hosts = self.application.hosts
-        my_region_only = None
+        region_lock = None
         ordered_regions = None
 
         show_full = self.get_argument("show_full", "true") == "true"
         lock_my_region = self.get_argument("my_region_only", "false") == "true"
+        selected_region = self.get_argument("region", None)
 
-        if geo:
-            p_lat, p_long = geo.location
-
-            if lock_my_region:
-                try:
-                    my_region_only = yield hosts.get_closest_region(p_long, p_lat)
-                except RegionNotFound:
-                    pass
-
-            if not my_region_only:
-                closest_regions = yield hosts.list_closest_regions(p_long, p_lat)
-                ordered_regions = [region.region_id for region in closest_regions]
+        if selected_region:
+            try:
+                region_lock = yield hosts.find_region(selected_region)
+            except RegionNotFound:
+                raise HTTPError(404, "No such region")
         else:
-            ordered_regions = None
+            ip = remote_ip(self.request)
+
+            if ip is None:
+                raise HTTPError(400, "Bad IP")
+
+            geo = geolite2.lookup(ip)
+
+            if geo:
+                p_lat, p_long = geo.location
+
+                if lock_my_region:
+                    try:
+                        region_lock = yield hosts.get_closest_region(p_long, p_lat)
+                    except RegionNotFound:
+                        pass
+
+                if not region_lock:
+                    closest_regions = yield hosts.list_closest_regions(p_long, p_lat)
+                    ordered_regions = [region.region_id for region in closest_regions]
+            else:
+                ordered_regions = None
 
         try:
             rooms = yield rooms_data.list_rooms(
@@ -346,7 +355,7 @@ class RoomsHandler(AuthenticatedHandler):
                 game_server_id, settings,
                 regions_order=ordered_regions,
                 show_full=show_full,
-                region=my_region_only)
+                region=region_lock)
         except RoomError as e:
             raise HTTPError(400, e.message)
 
@@ -355,6 +364,56 @@ class RoomsHandler(AuthenticatedHandler):
                 room.dump()
                 for room in rooms
                 ]
+        })
+
+
+class RegionsHandler(AuthenticatedHandler):
+    @scoped(scopes=["game"])
+    @coroutine
+    def get(self):
+        hosts = self.application.hosts
+
+        try:
+            regions = yield hosts.list_regions()
+        except RegionError as e:
+            raise HTTPError(e.code, e.message)
+
+        ip = remote_ip(self.request)
+
+        if ip is None:
+            raise HTTPError(400, "Bad IP")
+
+        geo = geolite2.lookup(ip)
+
+        my_region = None
+
+        if geo:
+            p_lat, p_long = geo.location
+
+            try:
+                my_region = yield hosts.get_closest_region(p_long, p_lat)
+            except RegionNotFound:
+                pass
+
+        if not my_region:
+            try:
+                my_region = yield hosts.get_default_region()
+            except RegionNotFound:
+                raise HTTPError(500, "No default region is defined")
+
+        self.dumps({
+            "regions": {
+                region.name : {
+                    "settings": region.settings,
+                    "location": {
+                        "x": region.geo_location[0],
+                        "y": region.geo_location[1],
+                    }
+                }
+
+                for region in regions
+            },
+            "my_region": my_region.name
         })
 
 

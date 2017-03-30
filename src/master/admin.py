@@ -6,6 +6,7 @@ import tornado.httpclient
 import common.admin as a
 from common.environment import AppNotFound
 from common.database import format_conditions_json, ConditionError
+from common.validate import validate
 
 from model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
 from model.host import HostNotFound, HostError, RegionNotFound, RegionError
@@ -26,6 +27,7 @@ import hashlib
 import urllib
 import datetime
 import math
+import re
 
 
 class ApplicationController(a.AdminController):
@@ -1360,7 +1362,8 @@ class BansController(a.AdminController):
             a.breadcrumbs([], "Bans"),
             a.links("Bans", [
                 a.link("find_ban", "Find A Ban", icon="search"),
-                a.link("new_ban", "Issue A Ban", icon="plus")
+                a.link("new_ban", "Issue A Ban", icon="plus"),
+                a.link("mass_ban", "Issue Multiple Bans", icon="plus-square"),
             ])
         ]
 
@@ -1486,6 +1489,61 @@ class IssueBanController(a.AdminController):
             ban_id=ban_id)
 
 
+class IssueMultipleBansController(a.AdminController):
+
+    @coroutine
+    def get(self):
+        raise Return({
+            "expires": str(datetime.datetime.now() + datetime.timedelta(days=7))
+        })
+
+    def render(self, data):
+        return [
+            a.breadcrumbs([
+                a.link("bans", "Bans")
+            ], "Issue Multiple Bans"),
+
+            a.form("New bans", fields={
+                "account_ids": a.field(
+                    "Account IDs (sepatated with spaces, commas, or with newlines)",
+                    "text", "primary", "number", order=0, multiline=10),
+                "reason": a.field(
+                    "Reason",
+                    "text", "primary", "non-empty", order=1),
+                "expires": a.field(
+                    "Expires",
+                    "date", "primary", "non-empty", order=2)
+            }, methods={
+                "create": a.method("Create", "primary", order=1)
+            }, data=data),
+            a.links("Navigate", [
+                a.link("bans", "Go back", icon="chevron-left")
+            ])
+        ]
+
+    def access_scopes(self):
+        return ["game_admin"]
+
+    @coroutine
+    def create(self, account_ids, expires, reason):
+
+        bans = self.application.bans
+
+        accounts = re.findall('\d+', account_ids, re.MULTILINE)
+
+        try:
+            for account in accounts:
+                yield bans.new_ban(self.gamespace, account, expires, reason)
+        except UserAlreadyBanned:
+            raise a.ActionError("User already banned")
+        except BanError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect(
+            "mass_ban",
+            message="Bans have been issued")
+
+
 class BanController(a.AdminController):
 
     @coroutine
@@ -1601,7 +1659,8 @@ class RegionController(a.AdminController):
             "name": region.name,
             "hosts": hosts_list,
             "geo_location": str(region.geo_location),
-            "region_default": "true" if region.default else "false"
+            "region_default": "true" if region.default else "false",
+            "settings": region.settings
         }
 
         raise a.Return(result)
@@ -1659,7 +1718,8 @@ class RegionController(a.AdminController):
                 "name": a.field("Region name", "text", "primary", "non-empty", order=1),
                 "geo_location": a.field("Geo location", "readonly", "primary", order=2),
                 "region_default": a.field(
-                    "Default region (to connect to in case user cannot be located)", "switch", "primary", order=3)
+                    "Default region (to connect to in case user cannot be located)", "switch", "primary", order=3),
+                "settings": a.field("Settings", "json", "primary", order=4)
             }, methods={
                 "update": a.method("Update", "primary", order=1),
                 "delete": a.method("Delete", "danger", order=2)
@@ -1709,7 +1769,8 @@ class RegionController(a.AdminController):
                          region_id=region_id)
 
     @coroutine
-    def update(self, name, region_default="false"):
+    @validate(name="str_name", region_default="bool", settings="load_json")
+    def update(self, name, region_default="false", settings="{}"):
         region_id = self.context.get("region_id")
         hosts = self.application.hosts
 
@@ -1717,7 +1778,8 @@ class RegionController(a.AdminController):
             yield hosts.update_region(
                 region_id,
                 name,
-                region_default == "true")
+                region_default,
+                settings)
         except RegionError as e:
             raise a.ActionError("Failed to update region: " + e.message)
 
@@ -1728,11 +1790,12 @@ class RegionController(a.AdminController):
 
 class NewRegionController(a.AdminController):
     @coroutine
-    def create(self, name, region_default="false"):
+    @validate(name="str_name", region_default="bool", settings="load_json")
+    def create(self, name, region_default="false", settings="{}"):
         hosts = self.application.hosts
 
         try:
-            region_id = yield hosts.new_region(name, region_default == "true")
+            region_id = yield hosts.new_region(name, region_default, settings)
         except RegionError as e:
             raise a.ActionError("Failed to create new region: " + e.message)
 
@@ -1740,6 +1803,12 @@ class NewRegionController(a.AdminController):
             "region",
             message="New region has been created",
             region_id=region_id)
+
+    @coroutine
+    def get(self):
+        raise a.Return({
+            "settings": {}
+        })
 
     def render(self, data):
         return [
@@ -1751,6 +1820,8 @@ class NewRegionController(a.AdminController):
                 "region_default": a.field(
                     "Default region (to connect to in "
                     "case user cannot be located)", "switch", "primary", "non-empty", order=2),
+
+                "settings": a.field("Region settings", "json", "primary", "non-empty", order=3),
             }, methods={
                 "create": a.method("Create", "primary")
             }, data=data),

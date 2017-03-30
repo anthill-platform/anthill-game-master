@@ -75,31 +75,18 @@ class HeartbeatModel(Model):
 
         self.processing = True
 
-        with (yield self.db.acquire(auto_commit=False)) as db:
-
-            # get list of the hosts, and lock them temporarily
+        with (yield self.db.acquire()) as db:
 
             try:
                 hosts = yield db.query(
                     """
                         SELECT * FROM `hosts`
-                        WHERE `host_enabled`=1 AND `host_processing`=0
-                        FOR UPDATE;
+                        WHERE `host_enabled`=1;
                     """)
 
                 hosts = map(HostAdapter, hosts)
 
                 if hosts:
-                    ids = [host.host_id for host in hosts]
-
-                    # mark hosts as 'being processed'
-                    yield db.execute(
-                        """
-                            UPDATE `hosts`
-                            SET `host_processing`=1
-                            WHERE `host_id` IN %s;
-                        """, ids)
-
                     failed = []
 
                     for host in hosts:
@@ -125,9 +112,8 @@ class HeartbeatModel(Model):
                         yield db.execute(
                             """
                                 UPDATE `hosts`
-                                SET `host_processing`=0, `host_state`='ERROR'
+                                SET `host_state`='ERROR'
                                 WHERE `host_id` IN %s;
                             """, failed)
             finally:
-                yield db.commit()
                 self.processing = False

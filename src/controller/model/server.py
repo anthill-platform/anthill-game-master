@@ -372,10 +372,12 @@ class GameServer(object):
         if str_data:
             self.__notify__(str_data)
 
+        # noinspection PyBroadException
         try:
             with SyncTimeout(5):
                 poll = self.pipe.wait(os.WNOHANG)
-        except SyncTimeout.TimeoutError:
+        except:
+            # totally may happen
             self.__recv_stop__()
         else:
             if poll:

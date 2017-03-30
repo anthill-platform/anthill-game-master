@@ -182,7 +182,8 @@ class Player(object):
     def join(self, search_settings,
              auto_create=False,
              create_room_settings=None,
-             lock_my_region=False):
+             lock_my_region=False,
+             selected_region=None):
         """
         Joins a player to the first available room. Waits until the room is
         :param search_settings: filters to search the rooms
@@ -190,25 +191,32 @@ class Player(object):
         :param create_room_settings: in case room auto creation is triggered, will be use to fill the new room's
                settings
         :param lock_my_region: should be search applied to the player's region only
+        :param selected_region: a name of the region to apply the search on
         """
 
         regions_order = None
 
-        geo = self.get_location()
-        my_region_only = None
+        if selected_region:
+            try:
+                region_lock = yield self.hosts.find_region(selected_region)
+            except RegionNotFound:
+                raise PlayerError(404, "No such region")
+        else:
+            geo = self.get_location()
+            region_lock = None
 
-        if geo:
-            p_lat, p_long = geo
+            if geo:
+                p_lat, p_long = geo
 
-            if lock_my_region:
-                try:
-                    my_region_only = yield self.hosts.get_closest_region(p_long, p_lat)
-                except RegionNotFound:
-                    pass
+                if lock_my_region:
+                    try:
+                        region_lock = yield self.hosts.get_closest_region(p_long, p_lat)
+                    except RegionNotFound:
+                        pass
 
-            if not my_region_only:
-                regions = yield self.hosts.list_closest_regions(p_long, p_lat)
-                regions_order = [region.region_id for region in regions]
+                if not region_lock:
+                    regions = yield self.hosts.list_closest_regions(p_long, p_lat)
+                    regions_order = [region.region_id for region in regions]
 
         try:
             self.record_id, key, self.room = yield self.rooms.find_and_join_room(
@@ -216,7 +224,7 @@ class Player(object):
                 self.account_id, self.access_token, search_settings,
 
                 regions_order=regions_order,
-                region=my_region_only)
+                region=region_lock)
 
         except RoomNotFound as e:
             if auto_create:

@@ -84,6 +84,7 @@ class GameMasterServer(common.server.Server):
 
             "bans": admin.BansController,
             "new_ban": admin.IssueBanController,
+            "mass_ban": admin.IssueMultipleBansController,
             "find_ban": admin.FindBanController,
             "ban": admin.BanController
         }
@@ -111,7 +112,8 @@ class GameMasterServer(common.server.Server):
             (r"/join/(.*)/(.*)/(.*)", h.JoinHandler),
             (r"/create/multi/(.*)/(.*)/(.*)", h.CreateMultiHandler),
             (r"/create/(.*)/(.*)/(.*)", h.CreateHandler),
-            (r"/status", h.StatusHandler)
+            (r"/status", h.StatusHandler),
+            (r"/regions", h.RegionsHandler)
         ]
 
 

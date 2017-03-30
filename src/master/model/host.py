@@ -2,6 +2,9 @@
 from tornado.gen import coroutine, Return
 import common.database
 from common.model import Model
+from common.validate import validate
+
+import ujson
 
 
 class HostError(Exception):
@@ -51,6 +54,7 @@ class RegionAdapter(object):
         self.region_id = str(data.get("region_id"))
         self.name = data.get("region_name")
         self.default = data.get("region_default", 0)
+        self.settings = data.get("region_settings", {})
         self.geo_location = tuple((data.get("region_location_x", 0), data.get("region_location_y", 0)))
 
 
@@ -65,14 +69,15 @@ class HostsModel(Model):
         return ["regions", "hosts"]
 
     @coroutine
-    def new_region(self, name, default):
+    @validate(name="str_name", default="bool", settings="json")
+    def new_region(self, name, default, settings):
         try:
             region_id = yield self.db.insert(
                 """
                 INSERT INTO `regions`
-                (`region_name`, `region_location`, `region_default`)
-                VALUES (%s, point(0, 0), %s);
-                """, name, int(bool(default))
+                (`region_name`, `region_location`, `region_default`, `region_settings`)
+                VALUES (%s, point(0, 0), %s, %s);
+                """, name, int(bool(default)), ujson.dumps(settings)
             )
         except common.database.DatabaseError as e:
             raise RegionError("Failed to create a region: " + e.args[1])
@@ -91,6 +96,28 @@ class HostsModel(Model):
                 WHERE `region_id`=%s
                 LIMIT 1;
                 """, region_id
+            )
+        except common.database.DatabaseError as e:
+            raise RegionError("Failed to get region: " + e.args[1])
+
+        if region is None:
+            raise RegionNotFound()
+
+        raise Return(RegionAdapter(region))
+
+    @coroutine
+    @validate(region_name="str_name")
+    def find_region(self, region_name):
+        try:
+            region = yield self.db.get(
+                """
+                SELECT *,
+                    ST_X(`region_location`) AS `region_location_x`,
+                    ST_Y(`region_location`) AS `region_location_y`
+                FROM `regions`
+                WHERE `region_name`=%s
+                LIMIT 1;
+                """, region_name
             )
         except common.database.DatabaseError as e:
             raise RegionError("Failed to get region: " + e.args[1])
@@ -198,14 +225,15 @@ class HostsModel(Model):
         raise Return(RegionAdapter(region))
 
     @coroutine
-    def update_region(self, region_id, name, default):
+    @validate(region_id="int", name="str_name", default="bool", setting="json")
+    def update_region(self, region_id, name, default, settings):
         try:
             yield self.db.execute(
                 """
                 UPDATE `regions`
-                SET `region_name`=%s, `region_default`=%s
+                SET `region_name`=%s, `region_default`=%s, `region_settings`=%s
                 WHERE `region_id`=%s;
-                """, name, int(bool(default)), region_id
+                """, name, int(bool(default)), ujson.dumps(settings), region_id
             )
         except common.database.DatabaseError as e:
             raise RegionError("Failed to update region: " + e.args[1])
