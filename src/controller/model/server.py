@@ -218,7 +218,7 @@ class GameServer(object):
             try:
                 services = yield common.discover.cache.get_services(discover, network="external")
             except DiscoveryError as e:
-                yield self.crashed("Failed to discover services for server-side use: " + e.message)
+                yield self.crashed("Failed to discover services for server-side use: " + str(e.code) + " " + e.message)
                 raise SpawnError("Failed to discover services for server-side use: " + e.message)
             else:
                 env["discovery:services"] = ujson.dumps(services, escape_forward_slashes=False)
