@@ -1,21 +1,25 @@
 
 from tornado.gen import coroutine, Return
 
-import logging
 from common.internal import Internal, InternalError
 from common.access import AccessToken
 
 from room import ApproveFailed, RoomError
+from deploy import NoCurrentDeployment, DeploymentError
+
+import logging
 
 
 class ControllerError(Exception):
-    def __init__(self, message):
+    def __init__(self, message, code=500):
+        self.code = code
         self.message = message
 
 
 class ControllersClientModel(object):
-    def __init__(self, rooms):
+    def __init__(self, rooms, deployments):
         self.rooms = rooms
+        self.deployments = deployments
         self.internal = Internal()
 
     @coroutine
@@ -70,6 +74,24 @@ class ControllersClientModel(object):
         except ApproveFailed:
             raise ControllerError("Failed to approve a leave")
         else:
+            raise Return({})
+
+    @coroutine
+    def check_deployment(self, gamespace, room_id, game_name, game_version, deployment_id, **payload):
+
+        try:
+            deployment = yield self.deployments.get_current_deployment(gamespace, game_name, game_version)
+        except NoCurrentDeployment:
+            raise ControllerError("No deployment for that version", code=404)
+        except DeploymentError as e:
+            raise ControllerError(e.message)
+        else:
+            if not deployment.enabled:
+                raise ControllerError("Game version is disabled", code=404)
+
+            if str(deployment.deployment_id) != str(deployment_id):
+                raise ControllerError("Deployment is outdated", code=410)
+
             raise Return({})
 
     @coroutine

@@ -200,14 +200,14 @@ class GameServersModel(Model):
         return self.db
 
     def get_setup_tables(self):
-        return ["game_servers", "game_versions"]
+        return ["game_servers", "game_server_versions"]
 
     @coroutine
     def delete_game_version(self, gamespace_id, game_name, game_version, game_server_id):
         try:
             yield self.db.get(
                 """
-                    DELETE FROM `game_versions`
+                    DELETE FROM `game_server_versions`
                     WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s AND `game_server_id`=%s;
                 """, gamespace_id, game_name, game_version, game_server_id)
         except common.database.DatabaseError as e:
@@ -218,7 +218,7 @@ class GameServersModel(Model):
         try:
             yield self.db.get(
                 """
-                    DELETE FROM `game_versions`
+                    DELETE FROM `game_server_versions`
                     WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_server_id`=%s;
                 """, gamespace_id, game_name, game_server_id)
         except common.database.DatabaseError as e:
@@ -227,7 +227,7 @@ class GameServersModel(Model):
         try:
             yield self.db.get(
                 """
-                    DELETE FROM `game_servers`
+                    DELETE FROM `game_server_versions`
                     WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_server_id`=%s;
                 """, gamespace_id, game_name, game_server_id)
         except common.database.DatabaseError as e:
@@ -239,7 +239,7 @@ class GameServersModel(Model):
             result = yield self.db.query(
                 """
                     SELECT *
-                    FROM `game_versions`
+                    FROM `game_server_versions`
                 """)
         except common.database.DatabaseError as e:
             raise GameError("Failed to get game settings:" + e.args[1])
@@ -303,7 +303,7 @@ class GameServersModel(Model):
             result = yield self.db.get(
                 """
                     SELECT `server_settings`
-                    FROM `game_versions`
+                    FROM `game_server_versions`
                     WHERE `gamespace_id`=%s AND `game_name`=%s AND `game_version`=%s AND `game_server_id`=%s
                 """, gamespace_id, game_name, game_version, game_server_id)
         except common.database.DatabaseError as e:
@@ -350,25 +350,16 @@ class GameServersModel(Model):
 
     @coroutine
     def set_version_game_server(self, gamespace_id, game_name, game_version, game_server_id, server_settings):
+
+        dump = ujson.dumps(server_settings)
+
         try:
-            yield self.get_version_game_server(gamespace_id, game_name, game_version, game_server_id)
-        except GameVersionNotFound:
-            try:
-                yield self.db.insert(
-                    """
-                        INSERT INTO `game_versions`
-                        (`game_name`, `game_version`, `game_server_id`, `gamespace_id`, `server_settings`)
-                        VALUES (%s, %s, %s, %s, %s);
-                    """, game_name, game_version, game_server_id, gamespace_id, ujson.dumps(server_settings))
-            except common.database.DatabaseError as e:
-                raise GameVersionError("Failed to insert config:" + e.args[1])
-        else:
-            try:
-                yield self.db.execute(
-                    """
-                        UPDATE `game_versions`
-                        SET `server_settings`=%s
-                        WHERE `game_name`=%s AND `game_version`=%s AND `gamespace_id`=%s AND `game_server_id`=%s;
-                    """, ujson.dumps(server_settings), game_name, game_version, gamespace_id, game_server_id)
-            except common.database.DatabaseError as e:
-                raise GameVersionError("Failed to update config:" + e.args[1])
+            yield self.db.execute(
+                """
+                    INSERT INTO `game_server_versions`
+                    (`game_name`, `game_version`, `game_server_id`, `gamespace_id`, `server_settings`)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE `server_settings`=%s;
+                """, game_name, game_version, game_server_id, gamespace_id, dump, dump)
+        except common.database.DatabaseError as e:
+            raise GameVersionError("Failed to insert config:" + e.args[1])

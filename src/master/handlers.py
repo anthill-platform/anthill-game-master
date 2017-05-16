@@ -42,7 +42,7 @@ class InternalHandler(object):
         try:
             result = yield self.application.ctl_client.received(gamespace, room_id, action, args, kwargs) or {}
         except ControllerError as e:
-            raise InternalError(500, e.message)
+            raise InternalError(e.code, e.message)
 
         raise Return(result)
 

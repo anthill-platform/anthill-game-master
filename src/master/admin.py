@@ -47,11 +47,14 @@ class ApplicationController(a.AdminController):
         except GameError as e:
             raise a.ActionError("Failed to list game servers: " + e.message)
 
+        app_versions = app["versions"].keys()
+        app_versions.sort()
+
         result = {
             "app_id": record_id,
             "app_record_id": app["id"],
             "app_name": app["title"],
-            "versions": app["versions"],
+            "versions": app_versions,
             "game_servers": servers
         }
 
@@ -62,19 +65,17 @@ class ApplicationController(a.AdminController):
         game_name = self.context.get("record_id")
 
         return [
-            a.breadcrumbs([
-                a.link("apps", "Applications")
-            ], data["app_name"]),
+            a.breadcrumbs([], data["app_name"]),
             a.links("Application '{0}' versions".format(data["app_name"]), links=[
                 a.link("app_version", v_name, icon="tags", app_id=game_name,
-                       version_id=v_name) for v_name, v_id in data["versions"].iteritems()
-                ]),
+                       version_id=v_name) for v_name in data["versions"]
+            ]),
             a.links("Game Servers", links=[
                 a.link("game_server", gs.name, icon="rocket", game_server_id=gs.game_server_id, game_name=game_name)
                 for gs in data["game_servers"]
-                ]),
+            ]),
             a.links("Navigate", [
-                a.link("apps", "Go back", icon="chevron-left"),
+                a.link("index", "Go back", icon="chevron-left"),
                 a.link("rooms", "See game rooms", icon="th-large", game_name=game_name),
                 a.link("new_game_server", "Create Game Server",
                        icon="plus", game_name=game_name),
@@ -119,7 +120,6 @@ class GameServerController(a.AdminController):
 
         return [
             a.breadcrumbs([
-                a.link("apps", "Applications"),
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
             ], data["game_server_name"]),
 
@@ -253,7 +253,6 @@ class NewGameServerController(a.AdminController):
 
         return [
             a.breadcrumbs([
-                a.link("apps", "Applications"),
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
             ], "New game server"),
 
@@ -389,7 +388,6 @@ class GameServerVersionController(a.AdminController):
 
         config.extend([
             a.breadcrumbs([
-                a.link("apps", "Applications"),
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
                 a.link("app_version", self.context.get("game_version"),
                        app_id=self.context.get("game_name"), version_id=self.context.get("game_version")),
@@ -452,7 +450,6 @@ class GameServerVersionController(a.AdminController):
 
 
 class ApplicationVersionController(a.AdminController):
-
     DEPLOYMENTS_PER_PAGE = 10
 
     @coroutine
@@ -474,12 +471,59 @@ class ApplicationVersionController(a.AdminController):
             raise a.ActionError("Deployment is not delivered yet, cannot switch")
 
         try:
-            yield deployments.set_current_deployment(self.gamespace, game_name, game_version, deployment_id)
+            yield deployments.update_game_version_deployment(
+                self.gamespace, game_name, game_version, deployment_id, True)
         except DeploymentError as e:
             raise a.ActionError("Failed to set game deployment: " + e.message)
 
         raise a.Redirect("app_version",
                          message="Deployment has been switched",
+                         app_id=game_name,
+                         version_id=game_version)
+
+    @coroutine
+    def version_disable(self, **ignored):
+        deployments = self.application.deployments
+
+        game_name = self.context.get("app_id")
+        game_version = self.context.get("version_id")
+
+        try:
+            current_deployment = yield deployments.get_current_deployment(self.gamespace, game_name, game_version)
+        except NoCurrentDeployment as e:
+            raise a.ActionError("No current deployment")
+
+        try:
+            yield deployments.update_game_version_deployment(
+                self.gamespace, game_name, game_version, current_deployment.deployment_id, False)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to set game deployment: " + e.message)
+
+        raise a.Redirect("app_version",
+                         message="Game version has been turned off",
+                         app_id=game_name,
+                         version_id=game_version)
+
+    @coroutine
+    def version_enable(self, **ignored):
+        deployments = self.application.deployments
+
+        game_name = self.context.get("app_id")
+        game_version = self.context.get("version_id")
+
+        try:
+            current_deployment = yield deployments.get_current_deployment(self.gamespace, game_name, game_version)
+        except NoCurrentDeployment as e:
+            raise a.ActionError("No current deployment")
+
+        try:
+            yield deployments.update_game_version_deployment(
+                self.gamespace, game_name, game_version, current_deployment.deployment_id, True)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to set game deployment: " + e.message)
+
+        raise a.Redirect("app_version",
+                         message="Game version has been turned on",
                          app_id=game_name,
                          version_id=game_version)
 
@@ -510,9 +554,11 @@ class ApplicationVersionController(a.AdminController):
             current_deployment = yield deployments.get_current_deployment(self.gamespace, app_id, version_id)
         except NoCurrentDeployment:
             current_deployment = None
+            deployment_enabled = False
         except DeploymentError as e:
             raise a.ActionError("Failed to get current deployment: " + e.message)
         else:
+            deployment_enabled = current_deployment.enabled
             current_deployment = current_deployment.deployment_id
 
         result = {
@@ -521,7 +567,9 @@ class ApplicationVersionController(a.AdminController):
             "servers": servers,
             "deployments": game_deployments,
             "pages": pages,
-            "current_deployment": current_deployment
+            "current_deployment": current_deployment,
+            "deployment_enabled": deployment_enabled,
+            "deployment_enabled_title": "Enabled" if deployment_enabled else "Disabled"
         }
 
         raise a.Return(result)
@@ -529,15 +577,28 @@ class ApplicationVersionController(a.AdminController):
     def render(self, data):
 
         current_deployment = data["current_deployment"]
+        deployment_enabled = data["deployment_enabled"]
 
         r = [
             a.breadcrumbs([
-                a.link("apps", "Applications"),
                 a.link("app", data["app_name"], record_id=self.context.get("app_id"))
             ], self.context.get("version_id"))
         ]
 
-        if not current_deployment:
+        if current_deployment:
+            r.append(a.form("Game Version " + str(self.context.get("version_id")) + " Status", fields={
+                "deployment_enabled_title":
+                    a.field("Status", "status",
+                            "success" if deployment_enabled else "danger")
+            }, methods={
+                "version_disable" if deployment_enabled else "version_enable": a.method(
+                    "Turn OFF" if deployment_enabled else "Turn ON",
+                    "danger" if deployment_enabled else "success",
+                    danger="Turning this game version OFF will make impossible for "
+                           "players to create new rooms of this version"
+                    if deployment_enabled else None)
+            }, data=data))
+        else:
             r.append(a.notice(
                 "Warning",
                 "There is no current deployment set for version <b>{0}</b>. "
@@ -546,6 +607,13 @@ class ApplicationVersionController(a.AdminController):
                     self.context.get("version_id")
                 )
             ))
+
+        r.append(
+            a.links("Upload New Deployment", [
+                a.link("deploy", "Deploy New Game Server", icon="upload",
+                       game_name=self.context.get("app_id"),
+                       game_version=self.context.get("version_id"))
+            ]))
 
         r.extend([
             a.content("Deployments", headers=[
@@ -568,8 +636,8 @@ class ApplicationVersionController(a.AdminController):
                         a.link("deployment", item.deployment_id, icon="folder-o", badge=(
                             "current" if current_deployment == item.deployment_id else None
                         ), game_name=self.context.get("app_id"),
-                           game_version=self.context.get("version_id"),
-                           deployment_id=item.deployment_id)
+                               game_version=self.context.get("version_id"),
+                               deployment_id=item.deployment_id)
                     ],
                     "date": str(item.date),
                     "status": [
@@ -589,7 +657,7 @@ class ApplicationVersionController(a.AdminController):
                     ] if (current_deployment != item.deployment_id) else "Current deployment"
                 }
                 for item in data["deployments"]
-                ], style="primary", empty="There is no deployments"),
+            ], style="primary", empty="There is no deployments"),
         ])
 
         if data["pages"] > 1:
@@ -603,12 +671,9 @@ class ApplicationVersionController(a.AdminController):
                     game_version=self.context.get("version_id"),
                     game_server_id=gs.game_server_id)
                 for gs in data["servers"]
-                ]),
+            ]),
 
             a.links("Navigate", [
-                a.link("deploy", "Deploy New Game Server", icon="upload",
-                       game_name=self.context.get("app_id"),
-                       game_version=self.context.get("version_id")),
                 a.link("app", "Go back", icon="chevron-left", record_id=self.context.get("app_id"))
             ])
         ])
@@ -697,12 +762,14 @@ class Delivery(object):
             ))
             yield deployments.update_deployment_status(
                 self.gamespace, deployment_id, DeploymentAdapter.STATUS_ERROR)
+            raise Return(False)
         else:
             yield deployments.update_deployment_status(
                 self.gamespace, deployment_id, DeploymentAdapter.STATUS_DELIVERED)
+            raise Return(True)
 
     @coroutine
-    def __deliver__(self, game_name, game_version, deployment_id, deployment_hash):
+    def __deliver__(self, game_name, game_version, deployment_id, deployment_hash, wait_for_deliver=False):
         hosts = self.application.hosts
         deployments = self.application.deployments
 
@@ -750,14 +817,19 @@ class Delivery(object):
                 self.gamespace, [
                     delivery_id
                     for delivery_id, host in deliver_list
-                    ], DeploymentDeliveryAdapter.STATUS_DELIVERING)
+                ], DeploymentDeliveryAdapter.STATUS_DELIVERING)
         except DeploymentDeliveryError as e:
             yield deployments.update_deployment_status(
                 self.gamespace, deployment_id, DeploymentAdapter.STATUS_ERROR)
             raise a.ActionError("Failed to update deployment deliveries status: " + e.message)
 
-        IOLoop.current().spawn_callback(
-            self.__deliver_upload__, game_name, game_version, deployment_id, deliver_list, deployment_hash)
+        if wait_for_deliver:
+            result = yield self.__deliver_upload__(
+                game_name, game_version, deployment_id, deliver_list, deployment_hash)
+            raise Return(result)
+        else:
+            IOLoop.current().spawn_callback(
+                self.__deliver_upload__, game_name, game_version, deployment_id, deliver_list, deployment_hash)
 
 
 class ApplicationDeploymentController(a.AdminController):
@@ -806,7 +878,6 @@ class ApplicationDeploymentController(a.AdminController):
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("apps", "Applications"),
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
                 a.link("app_version", self.context.get("game_version"),
                        app_id=self.context.get("game_name"), version_id=self.context.get("game_version"))
@@ -847,22 +918,24 @@ class ApplicationDeploymentController(a.AdminController):
                     "title": "Delivery status"
                 },
             ], [
-                {
-                    "host_name": data["hosts"][item.host_id].name if item.host_id in data["hosts"] else "Unknown",
-                    "host_location": data["hosts"][item.host_id].internal_location
-                    if item.host_id in data["hosts"] else "Unknown",
-                    "delivery_status": [
-                        {
-                            DeploymentDeliveryAdapter.STATUS_DELIVERING:
-                                a.status("Delivering", "info", "refresh fa-spin"),
-                            DeploymentDeliveryAdapter.STATUS_DELIVERED: a.status("Delivered", "success", "check"),
-                            DeploymentDeliveryAdapter.STATUS_ERROR: a.status("Error: " + item.error_reason,
-                                                                             "danger", "exclamation-triangle")
-                        }.get(item.status, a.status(item.status, "default", "refresh")),
-                    ]
-                }
-                for item in data["deliveries"]
-            ], "primary"),
+                          {
+                              "host_name": data["hosts"][item.host_id].name if item.host_id in data[
+                                  "hosts"] else "Unknown",
+                              "host_location": data["hosts"][item.host_id].internal_location
+                              if item.host_id in data["hosts"] else "Unknown",
+                              "delivery_status": [
+                                  {
+                                      DeploymentDeliveryAdapter.STATUS_DELIVERING:
+                                          a.status("Delivering", "info", "refresh fa-spin"),
+                                      DeploymentDeliveryAdapter.STATUS_DELIVERED: a.status("Delivered", "success",
+                                                                                           "check"),
+                                      DeploymentDeliveryAdapter.STATUS_ERROR: a.status("Error: " + item.error_reason,
+                                                                                       "danger", "exclamation-triangle")
+                                  }.get(item.status, a.status(item.status, "default", "refresh")),
+                              ]
+                          }
+                          for item in data["deliveries"]
+                      ], "primary"),
 
             a.links("Navigate", [
                 a.link("app_version", "Go back", icon="chevron-left",
@@ -920,6 +993,7 @@ class DeployApplicationController(a.UploadAdminController):
         self.deployment_file = None
         self.deployment_path = None
         self.sha256 = None
+        self.auto_switch = False
 
     @coroutine
     def get(self, game_name, game_version):
@@ -932,16 +1006,19 @@ class DeployApplicationController(a.UploadAdminController):
             raise a.ActionError("App was not found.")
 
         result = {
-            "app_name": app["title"]
+            "app_name": app["title"],
+            "switch_to_new": "true"
         }
 
         raise a.Return(result)
 
     @coroutine
-    def receive_started(self, filename):
+    def receive_started(self, filename, args):
 
         if not filename.endswith(".zip"):
             raise a.ActionError("The file passed is not a zip file.")
+
+        self.auto_switch = args.get("switch_to_new", "false") == "true"
 
         game_name = self.context.get("game_name")
         game_version = self.context.get("game_version")
@@ -1026,11 +1103,27 @@ class DeployApplicationController(a.UploadAdminController):
 
         delivery = Delivery(self.application, self.gamespace)
 
-        yield delivery.__deliver__(game_name, game_version, self.deployment, deployment_hash)
+        if self.auto_switch:
+            result = yield delivery.__deliver__(
+                game_name, game_version, self.deployment, deployment_hash,
+                wait_for_deliver=True)
+
+            if not result:
+                raise a.Redirect(
+                    "app_version",
+                    message="Failed to deliver deployment, cannot switch automatically",
+                    app_id=game_name,
+                    version_id=game_version)
+
+            yield deployments.update_game_version_deployment(
+                self.gamespace, game_name, game_version, self.deployment, True)
+        else:
+            yield delivery.__deliver__(game_name, game_version, self.deployment, deployment_hash)
 
         raise a.Redirect(
             "app_version",
-            message="Game server has been deployed",
+            message="Game server has been deployed and switched"
+            if self.auto_switch else "Game server has been deployed",
             app_id=game_name,
             version_id=game_version)
 
@@ -1042,7 +1135,6 @@ class DeployApplicationController(a.UploadAdminController):
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("apps", "Applications"),
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
                 a.link("app_version", self.context.get("game_version"),
                        app_id=self.context.get("game_name"), version_id=self.context.get("game_version"))
@@ -1050,7 +1142,9 @@ class DeployApplicationController(a.UploadAdminController):
 
             a.file_upload("Deploy <b>{0}</b> / version <b>{1}</b>".format(
                 data["app_name"], self.context.get("game_version")
-            )),
+            ), fields={
+                "switch_to_new": a.field("Switch to it once delivered to hosts", "switch", "primary")
+            }, data=data),
 
             a.links("Navigate", [
                 a.link("app_version", "Go back", icon="chevron-left",
@@ -1061,35 +1155,6 @@ class DeployApplicationController(a.UploadAdminController):
 
     def access_scopes(self):
         return ["game_deploy_admin"]
-
-
-class ApplicationsController(a.AdminController):
-    @coroutine
-    def get(self):
-        env_service = self.application.env_service
-        apps = yield env_service.list_apps(self.gamespace)
-
-        result = {
-            "apps": apps
-        }
-
-        raise a.Return(result)
-
-    def render(self, data):
-        return [
-            a.breadcrumbs([], "Applications"),
-            a.links("Select application", links=[
-                a.link("app", app_name, icon="mobile", record_id=app_id)
-                for app_id, app_name in data["apps"].iteritems()
-                ]),
-            a.links("Navigate", [
-                a.link("index", "Go back", icon="chevron-left"),
-                a.link("/environment/apps", "Manage apps", icon="link text-danger"),
-            ])
-        ]
-
-    def access_scopes(self):
-        return ["game_admin"]
 
 
 class DebugControllerAction(a.StreamAdminController):
@@ -1136,7 +1201,6 @@ class DebugHostController(a.AdminController):
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("regions", "Regions"),
                 a.link("region", data["region"].name, region_id=data["region"].region_id),
                 a.link("host", data["host"].name,
                        host_id=self.context.get("host_id"))
@@ -1194,7 +1258,6 @@ class NewHostController(a.AdminController):
     def render(self, data):
         return [
             a.breadcrumbs([
-                a.link("regions", "Regions"),
                 a.link("region", data["region"].name, region_id=data["region"].region_id),
             ], "New host"),
             a.form("New host", fields={
@@ -1214,12 +1277,45 @@ class NewHostController(a.AdminController):
 
 
 class RootAdminController(a.AdminController):
+    @coroutine
+    def get(self):
+
+        env_service = self.application.env_service
+        apps = yield env_service.list_apps(self.gamespace)
+
+        hosts = self.application.hosts
+
+        try:
+            regions_list = yield hosts.list_regions()
+        except RegionError as e:
+            raise a.ActionError("Failed to fetch regions: " + e.message)
+
+        result = {
+            "apps": apps,
+            "regions": regions_list
+        }
+
+        raise Return(result)
+
     def render(self, data):
         return [
-            a.links("Game service", [
-                a.link("apps", "Applications", icon="mobile"),
-                a.link("regions", "Regions", icon="globe"),
-                a.link("bans", "Bans", icon="ban")
+            a.links("Applications", links=[
+                a.link("app", app_name, icon="mobile", record_id=app_id)
+                for app_id, app_name in data["apps"].iteritems()
+            ]),
+            a.links("Regions", links=[
+                a.link("region", region.name, icon="globe", region_id=region.region_id)
+                for region in data["regions"]
+            ]),
+            a.links("Bans", [
+                a.link("find_ban", "Find A Ban", icon="search"),
+                a.link("new_ban", "Issue A Ban", icon="plus"),
+                a.link("mass_ban", "Issue Multiple Bans", icon="plus-square"),
+            ]),
+            a.links("Navigate", [
+                a.link("/environment/apps", "Manage apps", icon="link text-danger"),
+                a.link("new_region", "New region", "plus"),
+                a.link("hosts", "See Full Hosts List", "server")
             ])
         ]
 
@@ -1277,7 +1373,6 @@ class HostController(a.AdminController):
 
         return [
             a.breadcrumbs([
-                a.link("regions", "Regions"),
                 a.link("region", data["region"].name, region_id=data["region"].region_id),
             ], data["name"]),
             a.links("Debug", [
@@ -1322,61 +1417,10 @@ class HostController(a.AdminController):
                          host_id=host_id)
 
 
-class RegionsController(a.AdminController):
-    @coroutine
-    def get(self):
-        hosts = self.application.hosts
-
-        try:
-            regions_list = yield hosts.list_regions()
-        except RegionError as e:
-            raise a.ActionError("Failed to fetch regions: " + e.message)
-
-        result = {
-            "regions": regions_list
-        }
-
-        raise a.Return(result)
-
-    def render(self, data):
-        return [
-            a.breadcrumbs([], "Regions"),
-            a.links("Regions", links=[
-                a.link("region", region.name, icon="globe", region_id=region.region_id)
-                for region in data["regions"]
-                ]),
-            a.links("Navigate", [
-                a.link("index", "Go back", icon="chevron-left"),
-                a.link("new_region", "New region", "plus"),
-                a.link("hosts", "See Full Hosts List", "server")
-            ])
-        ]
-
-    def access_scopes(self):
-        return ["discovery_admin"]
-
-
-class BansController(a.AdminController):
-    def render(self, data):
-        return [
-            a.breadcrumbs([], "Bans"),
-            a.links("Bans", [
-                a.link("find_ban", "Find A Ban", icon="search"),
-                a.link("new_ban", "Issue A Ban", icon="plus"),
-                a.link("mass_ban", "Issue Multiple Bans", icon="plus-square"),
-            ])
-        ]
-
-    def access_scopes(self):
-        return ["game_admin"]
-
-
 class FindBanController(a.AdminController):
     def render(self, data):
         return [
-            a.breadcrumbs([
-                a.link("bans", "Bans")
-            ], "Find A Ban"),
+            a.breadcrumbs([], "Find A Ban"),
             a.split([
                 a.form(title="Find by ID", fields={
                     "ban_id": a.field("Ban ID", "text", "primary", "number"),
@@ -1437,7 +1481,6 @@ class FindBanController(a.AdminController):
 
 
 class IssueBanController(a.AdminController):
-
     @coroutine
     def get(self):
         raise Return({
@@ -1446,9 +1489,7 @@ class IssueBanController(a.AdminController):
 
     def render(self, data):
         return [
-            a.breadcrumbs([
-                a.link("bans", "Bans")
-            ], "Issue a Ban"),
+            a.breadcrumbs([], "Issue a Ban"),
 
             a.form("New ban", fields={
                 "account_id": a.field(
@@ -1464,7 +1505,7 @@ class IssueBanController(a.AdminController):
                 "create": a.method("Create", "primary", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("bans", "Go back", icon="chevron-left")
+                a.link("index", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1490,7 +1531,6 @@ class IssueBanController(a.AdminController):
 
 
 class IssueMultipleBansController(a.AdminController):
-
     @coroutine
     def get(self):
         raise Return({
@@ -1499,9 +1539,7 @@ class IssueMultipleBansController(a.AdminController):
 
     def render(self, data):
         return [
-            a.breadcrumbs([
-                a.link("bans", "Bans")
-            ], "Issue Multiple Bans"),
+            a.breadcrumbs([], "Issue Multiple Bans"),
 
             a.form("New bans", fields={
                 "account_ids": a.field(
@@ -1517,7 +1555,7 @@ class IssueMultipleBansController(a.AdminController):
                 "create": a.method("Create", "primary", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("bans", "Go back", icon="chevron-left")
+                a.link("index", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1545,7 +1583,6 @@ class IssueMultipleBansController(a.AdminController):
 
 
 class BanController(a.AdminController):
-
     @coroutine
     def get(self, ban_id):
 
@@ -1567,9 +1604,7 @@ class BanController(a.AdminController):
 
     def render(self, data):
         return [
-            a.breadcrumbs([
-                a.link("bans", "Bans")
-            ], self.context.get("ban_id")),
+            a.breadcrumbs([], self.context.get("ban_id")),
 
             a.form("Ban", fields={
                 "account_id": a.field(
@@ -1586,7 +1621,7 @@ class BanController(a.AdminController):
                 "delete": a.method("Delete", "danger", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("bans", "Go back", icon="chevron-left")
+                a.link("index", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1623,7 +1658,7 @@ class BanController(a.AdminController):
             raise a.ActionError(e.message)
 
         raise a.Redirect(
-            "bans",
+            "index",
             message="Ban has been deleted")
 
 
@@ -1639,7 +1674,7 @@ class RegionController(a.AdminController):
             raise a.ActionError("Failed to delete region: " + e.message)
 
         raise a.Redirect(
-            "regions",
+            "index",
             message="Region has been deleted")
 
     @coroutine
@@ -1667,9 +1702,7 @@ class RegionController(a.AdminController):
 
     def render(self, data):
         return [
-            a.breadcrumbs([
-                a.link("regions", "Regions"),
-            ], data["name"]),
+            a.breadcrumbs([], data["name"]),
 
             a.content("Hosts", [
                 {
@@ -1697,22 +1730,23 @@ class RegionController(a.AdminController):
                     "title": "Last Check"
                 }
             ], [
-                {
-                    "name": [
-                        a.link("host", host.name,
-                       icon="battery-{0}".format(min(int(host.load / 20), 4)), host_id=host.host_id)
-                    ],
-                    "enabled": [
-                        a.status(
-                            "Yes" if host.enabled else "No",
-                            "success" if host.enabled else "danger")],
-                    "cpu": "{0} %".format(host.cpu) if host.active else "-",
-                    "memory": "{0} %".format(host.memory) if host.active else "-",
-                    "status": [a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
-                    "heartbeat": str(host.heartbeat)
-                }
-                for host in data["hosts"]
-            ], "primary", empty="No hosts to display"),
+                          {
+                              "name": [
+                                  a.link("host", host.name,
+                                         icon="battery-{0}".format(min(int(host.load / 20), 4)), host_id=host.host_id)
+                              ],
+                              "enabled": [
+                                  a.status(
+                                      "Yes" if host.enabled else "No",
+                                      "success" if host.enabled else "danger")],
+                              "cpu": "{0} %".format(host.cpu) if host.active else "-",
+                              "memory": "{0} %".format(host.memory) if host.active else "-",
+                              "status": [
+                                  a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
+                              "heartbeat": str(host.heartbeat)
+                          }
+                          for host in data["hosts"]
+                      ], "primary", empty="No hosts to display"),
 
             a.form("Region '{0}' information".format(data["name"]), fields={
                 "name": a.field("Region name", "text", "primary", "non-empty", order=1),
@@ -1812,9 +1846,7 @@ class NewRegionController(a.AdminController):
 
     def render(self, data):
         return [
-            a.breadcrumbs([
-                a.link("regions", "Regions")
-            ], "New region"),
+            a.breadcrumbs([], "New region"),
             a.form("New region", fields={
                 "name": a.field("Region name", "text", "primary", "non-empty", order=1),
                 "region_default": a.field(
@@ -1886,7 +1918,6 @@ class RoomController(a.AdminController):
 
         return [
             a.breadcrumbs([
-                a.link("apps", "Applications"),
                 a.link("app", data["game_title"], record_id=game_name),
                 a.link("rooms", "Rooms", game_name=game_name)
             ], self.context.get("room_id")),
@@ -1901,7 +1932,6 @@ class RoomController(a.AdminController):
 
 
 class RoomsController(a.AdminController):
-
     ROOMS_PER_PAGE = 20
 
     @coroutine
@@ -2090,7 +2120,6 @@ class RoomsController(a.AdminController):
 
         return [
             a.breadcrumbs([
-                a.link("apps", "Applications"),
                 a.link("app", data["game_title"], record_id=game_name)
             ], "Rooms"),
             a.content("Rooms: {0} total".format(data["total_count"]), [
@@ -2147,7 +2176,6 @@ class RoomsController(a.AdminController):
 
 
 class HostsController(a.AdminController):
-
     @coroutine
     def get(self):
         hosts = self.application.hosts
@@ -2166,13 +2194,10 @@ class HostsController(a.AdminController):
         raise a.Return(result)
 
     def render(self, data):
-
         regions = data["regions"]
 
         return [
-            a.breadcrumbs([
-                a.link("regions", "Regions"),
-            ], "Full Host List"),
+            a.breadcrumbs([], "Full Host List"),
 
             a.content("Hosts", [
                 {
@@ -2204,29 +2229,31 @@ class HostsController(a.AdminController):
                     "title": "Last Check"
                 }
             ], [
-                {
-                    "region": [
-                        a.link("region", regions[host.region_id].name if host.region_id in regions else "Unknown",
-                               icon="globe", region_id=host.region_id)
-                    ],
-                    "name": [
-                        a.link("host", host.name,
-                       icon="battery-{0}".format(min(int(host.load / 20), 4)), host_id=host.host_id)
-                    ],
-                    "enabled": [
-                        a.status(
-                            "Yes" if host.enabled else "No",
-                            "success" if host.enabled else "danger")],
-                    "cpu": "{0} %".format(host.cpu) if host.active else "-",
-                    "memory": "{0} %".format(host.memory) if host.active else "-",
-                    "status": [a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
-                    "heartbeat": str(host.heartbeat)
-                }
-                for host in data["hosts"]
-            ], "primary", empty="No hosts to display"),
+                          {
+                              "region": [
+                                  a.link("region",
+                                         regions[host.region_id].name if host.region_id in regions else "Unknown",
+                                         icon="globe", region_id=host.region_id)
+                              ],
+                              "name": [
+                                  a.link("host", host.name,
+                                         icon="battery-{0}".format(min(int(host.load / 20), 4)), host_id=host.host_id)
+                              ],
+                              "enabled": [
+                                  a.status(
+                                      "Yes" if host.enabled else "No",
+                                      "success" if host.enabled else "danger")],
+                              "cpu": "{0} %".format(host.cpu) if host.active else "-",
+                              "memory": "{0} %".format(host.memory) if host.active else "-",
+                              "status": [
+                                  a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
+                              "heartbeat": str(host.heartbeat)
+                          }
+                          for host in data["hosts"]
+                      ], "primary", empty="No hosts to display"),
 
             a.links("Navigate", [
-                a.link("regions", "Go back", icon="chevron-left")
+                a.link("index", "Go back", icon="chevron-left")
             ])
         ]
 

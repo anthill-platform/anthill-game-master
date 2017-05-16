@@ -953,9 +953,12 @@ class RoomsModel(Model):
                     {
                         "room_id": room_id,
                         "gamespace": gamespace
-                    }, discover_service=False, timeout=60)
+                    }, discover_service=False, timeout=10)
 
             except InternalError as e:
+                if e.code == 599:
+                    pass
+
                 raise RoomError("Failed to terminate a room: " + str(e.code) + " " + e.body)
 
         yield self.remove_room(gamespace, room_id)

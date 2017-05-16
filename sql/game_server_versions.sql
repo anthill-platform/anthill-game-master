@@ -1,4 +1,4 @@
-CREATE TABLE `game_versions` (
+CREATE TABLE `game_server_versions` (
   `record_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `gamespace_id` int(11) NOT NULL,
   `game_name` varchar(64) NOT NULL DEFAULT '',

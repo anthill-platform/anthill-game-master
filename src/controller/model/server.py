@@ -157,6 +157,8 @@ class GameServer(object):
     @coroutine
     def inited(self, settings):
 
+        self.__handle__("check_deployment", self.__check_deployment__)
+
         yield self.room.update_settings({}, settings)
 
         self.__notify__(u"Inited.")
@@ -440,6 +442,26 @@ class GameServer(object):
 
     def __clear_handle__(self, action):
         self.handlers.pop(action)
+
+    @coroutine
+    def __check_deployment__(self):
+
+        """
+        Checks if the current deployment of the game server is still up to date
+        It wraps the original call because the actual game server does not know
+            the deployment_id
+        """
+
+        try:
+            response = yield self.room.notify(
+                "check_deployment",
+                game_name=self.game_name,
+                game_version=self.game_version,
+                deployment_id=self.deployment)
+        except NotifyError as e:
+            raise common.jsonrpc.JsonRPCError(e.code, e.message)
+
+        raise Return(response)
 
     @coroutine
     def command(self, context, method, *args, **kwargs):

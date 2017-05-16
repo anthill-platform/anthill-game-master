@@ -49,7 +49,7 @@ class GameMasterServer(common.server.Server):
         self.bans = BansModel(self.db)
         self.heartbeat = HeartbeatModel(self, self.db)
 
-        self.ctl_client = ControllersClientModel(self.rooms)
+        self.ctl_client = ControllersClientModel(self.rooms, self.deployments)
 
         self.ratelimit = common.ratelimit.RateLimit({
             "create_room": options.rate_create_room
@@ -61,7 +61,6 @@ class GameMasterServer(common.server.Server):
     def get_admin(self):
         return {
             "index": admin.RootAdminController,
-            "apps": admin.ApplicationsController,
             "app": admin.ApplicationController,
             "app_version": admin.ApplicationVersionController,
             "deploy": admin.DeployApplicationController,
@@ -78,11 +77,9 @@ class GameMasterServer(common.server.Server):
             "debug_host": admin.DebugHostController,
             "new_host": admin.NewHostController,
 
-            "regions": admin.RegionsController,
             "region": admin.RegionController,
             "new_region": admin.NewRegionController,
 
-            "bans": admin.BansController,
             "new_ban": admin.IssueBanController,
             "mass_ban": admin.IssueMultipleBansController,
             "find_ban": admin.FindBanController,

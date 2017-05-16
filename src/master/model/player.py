@@ -114,7 +114,12 @@ class Player(object):
             deployment = yield self.app.deployments.get_current_deployment(
                 self.gamespace, self.game_name, self.game_version)
         except NoCurrentDeployment:
-            raise PlayerError(500, "No deployment defined for {0}/{1}".format(
+            raise PlayerError(404, "No deployment defined for {0}/{1}".format(
+                self.game_name, self.game_version
+            ))
+
+        if not deployment.enabled:
+            raise PlayerError(410, "Deployment is disabled for {0}/{1}".format(
                 self.game_name, self.game_version
             ))
 
@@ -409,7 +414,12 @@ class PlayersGroup(object):
             deployment = yield self.app.deployments.get_current_deployment(
                 self.gamespace, self.game_name, self.game_version)
         except NoCurrentDeployment:
-            raise PlayerError(500, "No deployment defined for {0}/{1}".format(
+            raise PlayerError(404, "No deployment defined for {0}/{1}".format(
+                self.game_name, self.game_version
+            ))
+
+        if not deployment.enabled:
+            raise PlayerError(410, "Deployment is disabled for {0}/{1}".format(
                 self.game_name, self.game_version
             ))
 
