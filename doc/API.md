@@ -158,6 +158,21 @@ Once the `inited` request is called, the Master Service will return the Game Ser
 
 That information is need to be used by Player to perform a connection to the Game Server Instance.
  
+### 9. The Game Server instance status
+ 
+After complete initialization, Game Controller service with periodically check (or heartbeat) the Game Server instance
+status using `status` request.
+
+Please note that this request comes from the Game Controller side, to the Game Controller instance:
+
+```
+Controller Service -> { request 'status' } -> Game Server instance
+```
+
+The Game Server instance is required to respond to that request with `{"status": "ok"}` object.
+If other response is received, or no response received in certain time, the Game Server instance will be
+shot down as "hang".
+ 
 # Join Room Flow
 
 No matter if the Game Server instance is spawned or not, the Player is required to be joined into the
