@@ -56,10 +56,60 @@ server-side use. See `Discover Services` section of the Game Server Configuratio
 * `server:settings` A JSON Object with Custom Server Configuration Settings (see according section of 
 the Game Server Configuration).
 
-### 6. Game Server initialization
+### 6. Communication between Game Server and Controller Service
 
-After being spawned, the Game Server instance would need to communicate with Controller on the
-Unix Domain Socket provided in the command line arguments using [JSON-RPC](http://www.jsonrpc.org/specification) protocol.
+After being spawned, the Game Server instance is required to communicate with Controller Service using
+[JSON-RPC](http://www.jsonrpc.org/specification) protocol.
+
+In short, a JSON-RPC protocol allows two nodes to send each other requests, end receive responses 
+(in form of JSON objects):
+
+```
+Node A -> { request JSON object } -> Node B
+Node A <- { response JSON object } <- Node B
+```
+
+JSON-RPC is a high-level protocol, so the [ZeroMQ library](http://zeromq.org/) is used to proceed 
+transport-level communication:
+
+* The Game Server instance must create 
+[ØMQ Pair](http://learning-0mq-with-pyzmq.readthedocs.io/en/latest/pyzmq/patterns/pair.html) socket instance
+* Then, the Game Server instance must bind that socket with [Inter-Process Communication](http://api.zeromq.org/2-1:zmq-ipc) 
+transport of the ZeroMQ to listen on that Unix Domain Socket
+* On top of that, each ZeroMQ message should be a complete JSON-RPC object (either request or response).
+
+<details>
+<summary>Python example (<a href="https://github.com/zeromq/pyzmq">PyZMQ</a>)</summary><p>
+
+```python
+context = zmq.Context()
+socket = context.socket(zmq.PAIR)
+socket.connect("ipc://<path to unix domain socket file>")
+```
+</p></details>
+<details>
+<summary>Java example (<a href="https://github.com/zeromq/jzmq">JZMQ</a>)</summary><p>
+
+```java
+context = new ZContext();
+socket = context.createSocket(ZMQ.PAIR);
+socket.connect("ipc://<path to unix domain socket file>")
+```
+</p></details>
+<details>
+<summary>C++ example (<a href="https://github.com/zeromq/zmqpp">ZMQPP</a>)</summary><p>
+
+```c++
+m_context = std::shared_ptr<zmqpp::context>(new zmqpp::context());   
+zmqpp::socket_type type = zmqpp::socket_type::pair;
+m_socket = std::shared_ptr<zmqpp::socket>(new zmqpp::socket(*m_context, type));
+zmqpp::endpoint_t endpoint = "ipc://<path to unix domain socket file>";
+m_socket->set(zmqpp::socket_option::linger, 1);
+m_socket->connect(endpoint);
+```
+</p></details>
+
+### 7. Game Server initialization
 
 Once the Game Server instance is completely initialized and ready to receive connections, the `inited` request should be
 sent to the Controller.
@@ -96,7 +146,7 @@ to send the `inited` request to the Controller that the Game Server is completel
 **Warning**: If the Game Server would not manage to initialize within that time, the Game Server instance will be
 killed, and the error is returned to the Player.
 
-### 7. The Game Server instance details 
+### 8. The Game Server instance details 
 
 Once the `inited` request is called, the Master Service will return the Game Server instance details to the player
 (as described in step 4):
@@ -188,8 +238,8 @@ If the request is successful, the Controller will respond:
 
 ```json
 {
-    "access_token": <Player's access token>,
-    "scopes": [<A list of Player's access token scopes>]
+    "access_token": "<Player's access token>",
+    "scopes": ["<A list of Player's access token scopes>"]
 }
 ```
 
@@ -242,3 +292,126 @@ Arguments for that command are:
 <br>
 
 After a successful response, a slot it room is freed for future joins.
+
+# Controller Service JSON-RPC API
+
+This section describes API calls that Game Server instance can make to the Controller Service.
+
+## Initialized Request
+
+Called when the Game Server instance is completely initialized and ready to accept new players.
+
+#### ← Request
+
+Method Name: `inited`. Arguments:
+
+| Argument         | Description                                                                                    |
+|------------------|------------------------------------------------------------------------------------------------|
+| `settings`     | (Optional) Update room settings along with initialization                                        |
+
+If the argument `settings` passed along the request, the rooms settings is updated with that argument.
+For example, if player requested to create a room with `{"map": "badone"}` and the Game
+Server instance realized there is no such map, in can choose the other map instead, and pass
+`{"map": "goodone"}` as the `settings` argument to the `inited` call. That would lead to the room
+have correct map setting no matter what setting the Player have passed.
+
+#### → Response
+
+The Controller will respond `{"status": "OK"}` to that request if everything went fine. If the error
+is returned instead, the Game Server instance should exit the process (and will be forced to at some point).
+
+## Player Joined Request
+
+Called once a Player connected to the Game Server instance. That call with exchange
+a Player's registration Key for Player's `Access Token`, at the same time making Player
+registration inside of the Room permanent.
+
+#### ← Request
+
+Method Name: `joined`. Arguments:
+
+| Argument         | Description            |
+|------------------|------------------------|
+| `key`     | The registration Key |
+| `extend_token`, `extend_scopes`   | (Optional) See step 2a for more information.  | 
+
+If both `extend_token` and `extend_scopes` are passed diring the `joined` request, the `Access Token` of the player
+will be [extended](https://github.com/anthill-services/anthill-login/blob/master/doc/API.md#extend-access-token)
+using `extend_token` as master token and `extend_scopes` as a list of scopes the Player's `Access Token` should be extended with.
+
+Token extention is used to do strict actions server side in behalf of the Player while the Player itself cannot. For example,
+
+1. User Authenticates asking for `profile` scope. This scope allows only to read user profile, but not to write;
+2. The Game Server instance Authenticates itself with `profile_write` scope access (allows to modify the profile);
+3. The Game Server extends this token to the more powerful one, so server can write the profile in behalf of the Player;
+4. At the same time, user still have perfectly working access token, without such possibility;
+5. So player can only read Player's profile, but the Game Server can also write it.
+
+#### → Response
+
+If the request is successful, the Controller will respond:
+
+```json
+{
+    "access_token": "<Player's access token>",
+    "scopes": ["<A list of Player's access token scopes>"]
+}
+```
+
+## Player Left Request
+
+Called once a Player disconnected from the Game Server instance. That call will remove Player's
+registration from the Room allowing other Players to connect to the Room.
+
+#### ← Request
+
+Method Name: `left`. Arguments:
+
+| Argument         | Description            |
+|------------------|------------------------|
+| `key`     | The registration Key |
+
+#### → Response
+
+If the request is successful, the Controller will respond with empty object `{}`
+
+## Update Room Settings Request
+
+Called once Game Server instance decided to update room settings 
+(for example, a map or mode have just changed)
+
+#### ← Request
+
+Method Name: `update_settings`. Arguments:
+
+| Argument         | Description            |
+|------------------|------------------------|
+| `settings`       | New settings for the Room |
+
+#### → Response
+
+If the request is successful, the Controller will respond with empty object `{}`
+
+## Check Game Server Deployment Request
+
+Called to check if the Game Server instance is still up to date (the game version may be
+disabled from spawning, or a new Game Server Deployment is available). Once the deployment is not
+valid anymore, the Game Server instance may decide to gracefully shut down at the end of
+
+#### ← Request
+
+Method Name: `check_deployment`. No arguments.
+
+#### → Response
+
+If the deployment is still up to date, the Controller will respond with empty object `{}`. Otherwise, an
+error will be returned, with the explanation.
+
+| Error Code    | Description                                          |
+|---------------|------------------------------------------------------|
+| 404           | The game version is turned off or there is no such game version |
+| 410           | Current deployment is outdated |
+
+
+
+
