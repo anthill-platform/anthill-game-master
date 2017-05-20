@@ -4,7 +4,9 @@ When it comes to hosting a server for a multiplayer game, major problems appear:
 1. Game servers actually need to be put somewhere;
 2. The life cycle of the game server need to be maintained (as game servers may crash or become outdated);
 3. The players should be "matchmaked" either by region (to ensure low latency) or by custom set or/and rules
-(completely game-specific, for example, a user level, map, or game mode).
+(completely game-specific, for example, a user level, map, or game mode);
+4. The system overall must be scalable to add new servers into the pool when the concurrent players number explode;
+5. Binary files of the game server need to be deployed to all host machines (the more machines are, harder it is).
 
 This service solves them all, the rest is completely up to the game.
 
@@ -40,5 +42,5 @@ may be grouped by a Region.
 ## Overall Architecture
 
 <center>
-<img src="https://cloud.githubusercontent.com/assets/1666014/26257951/47fa688c-3ccb-11e7-902f-e3f13cf60912.png" width="954">
+<img src="https://cloud.githubusercontent.com/assets/1666014/26266946/613bc5a0-3cf0-11e7-9c1e-59e403ea5bdd.png" width="954">
 </center>
