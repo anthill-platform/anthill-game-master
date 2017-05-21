@@ -70,7 +70,7 @@ class ApplicationController(a.AdminController):
                 a.link("app_version", v_name, icon="tags", app_id=game_name,
                        version_id=v_name) for v_name in data["versions"]
             ]),
-            a.links("Game Servers", links=[
+            a.links("Game Server Configurations", links=[
                 a.link("game_server", gs.name, icon="rocket", game_server_id=gs.game_server_id, game_name=game_name)
                 for gs in data["game_servers"]
             ]),
@@ -123,19 +123,20 @@ class GameServerController(a.AdminController):
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
             ], data["game_server_name"]),
 
-            a.form("Game Server Settings", fields={
+            a.form("Game Server Configuration", fields={
                 "game_server_name": a.field(
-                    "Game Server Name",
+                    "Game Server Configuration Name",
                     "text", "primary", "non-empty", order=0),
                 "game_settings": a.field(
-                    "Game Configuration", "dorn",
+                    "Configuration", "dorn",
                     "primary", "non-empty", schema=GameServersModel.GAME_SETTINGS_SCHEME, order=1),
                 "server_settings": a.field(
-                    "The configuration would be send to spawned game server instance as a JSON.",
+                    "Custom Server Configuration Settings (set as "
+                    "<span class=\"label label-default\">server:settings</span> environment variable)",
                     "dorn", "primary", "non-empty", schema=data["schema"], order=2),
                 "max_players": a.field("Max players per room", "text", "primary", "number", order=4),
                 "schema": a.field(
-                    "Game Server Configuration Schema", "json", "primary", "non-empty", order=5)
+                    "Game Server Configuration Settings Schema", "json", "primary", "non-empty", order=5)
             }, methods={
                 "update": a.method("Update", "primary", order=1),
                 "delete": a.method("Delete", "danger", order=2)
@@ -256,12 +257,12 @@ class NewGameServerController(a.AdminController):
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
             ], "New game server"),
 
-            a.form("Game Server Settings", fields={
+            a.form("Game Server Configuration", fields={
                 "game_server_name": a.field(
-                    "Game Server Name",
+                    "Game Server Configuration Name",
                     "text", "primary", "non-empty", order=0),
                 "game_settings": a.field(
-                    "Game Configuration", "dorn",
+                    "Configuration", "dorn",
                     "primary", "non-empty", schema=GameServersModel.GAME_SETTINGS_SCHEME, order=1),
                 "max_players": a.field("Max players per room", "text", "primary", "number", order=4),
                 "schema": a.field(
@@ -380,8 +381,8 @@ class GameServerVersionController(a.AdminController):
 
         if not data["version_settings"]:
             config.append(a.notice(
-                "Default configuration",
-                "This version ({0}) has no configuration, so default configuration ({1}) applied. "
+                "Default Configuration",
+                "This version ({0}) has no configuration, so default Game Server Configuration ({1}) applied. "
                 "Edit the configuration below to overwrite it.".format(
                     self.context.get("game_version"), data["game_server_name"]
                 )))
@@ -391,14 +392,17 @@ class GameServerVersionController(a.AdminController):
                 a.link("app", data["app_name"], record_id=self.context.get("game_name")),
                 a.link("app_version", self.context.get("game_version"),
                        app_id=self.context.get("game_name"), version_id=self.context.get("game_version")),
+                a.link("game_server", data["game_server_name"], game_server_id=self.context.get("game_server_id"),
+                       game_name=self.context.get("game_name")),
 
-            ], "Game Server {0} version {1}".format(
-                data["game_server_name"], self.context.get("game_version"))),
+            ], "Custom Server Configuration Settings"),
 
-            a.form(title="Server configuration for version {0}".format(
-                self.context.get("game_version")), fields={
-                "server_settings": a.field("Server Configuration", "dorn", "primary", "non-empty",
-                                           schema=data["schema"])
+            a.form(title="Custom Server Configuration Settings for {0}/{1}".format(
+                data["game_server_name"], self.context.get("game_version")), fields={
+                "server_settings": a.field(
+                    "Custom Server Configuration Settings (set as "
+                    "<span class=\"label label-default\">server:settings</span> environment variable)",
+                    "dorn", "primary", "non-empty", schema=data["schema"])
             }, methods={
                 "update": a.method("Update", "primary"),
                 "delete": a.method("Delete", "danger")
@@ -416,7 +420,7 @@ class GameServerVersionController(a.AdminController):
         return ["game_admin"]
 
     @coroutine
-    def update(self, server_settings):
+    def update(self, server_settings, **ignored):
 
         gameservers = self.application.gameservers
 
@@ -664,7 +668,7 @@ class ApplicationVersionController(a.AdminController):
             r.append(a.pages(data["pages"]))
 
         r.extend([
-            a.links("Game Servers configurations for game version {0}".format(self.context.get("version_id")), links=[
+            a.links("Game Servers Configurations for game version {0}".format(self.context.get("version_id")), links=[
                 a.link(
                     "game_server_version", gs.name, icon="rocket",
                     game_name=self.context.get("app_id"),
@@ -1733,7 +1737,8 @@ class RegionController(a.AdminController):
                           {
                               "name": [
                                   a.link("host", host.name,
-                                         icon="battery-{0}".format(min(int(host.load / 20), 4)), host_id=host.host_id)
+                                         icon="thermometer-{0}".format(min(int(host.load / 20), 4)),
+                                         host_id=host.host_id)
                               ],
                               "enabled": [
                                   a.status(
@@ -2237,7 +2242,8 @@ class HostsController(a.AdminController):
                               ],
                               "name": [
                                   a.link("host", host.name,
-                                         icon="battery-{0}".format(min(int(host.load / 20), 4)), host_id=host.host_id)
+                                         icon="thermometer-{0}".format(min(int(host.load / 20), 4)),
+                                         host_id=host.host_id)
                               ],
                               "enabled": [
                                   a.status(

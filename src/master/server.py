@@ -98,7 +98,7 @@ class GameMasterServer(common.server.Server):
         return {
             "title": "Game",
             "description": "Manage game server instances",
-            "icon": "rocket"
+            "icon": "gamepad"
         }
 
     def get_handlers(self):

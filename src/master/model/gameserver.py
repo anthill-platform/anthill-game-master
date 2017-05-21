@@ -62,23 +62,30 @@ class GameServersModel(Model):
 
     GAME_SETTINGS_SCHEME = {
         "type": "object",
+        "format": "grid",
         "properties": {
             "binary": {
                 "type": "string",
                 "title": "Application Binary",
                 "description": "A binary file would be called at server startup",
                 "minLength": 1,
-                "propertyOrder": 1
+                "propertyOrder": 1,
+                "options": {
+                    "grid_columns": 4
+                }
             },
             "ports": {
                 "type": "number",
                 "format": "number",
-                "title": "Ports number",
-                "description": "Amount of ports being user by this application (either TCP or UDP)",
+                "title": "Ports amount",
+                "description": "Amount of ports being used by this application (either TCP or UDP)",
                 "default": 1,
                 "maximum": 4,
                 "minimum": 1,
-                "propertyOrder": 2
+                "propertyOrder": 2,
+                "options": {
+                    "grid_columns": 4
+                }
             },
             "check_period": {
                 "type": "number",
@@ -88,7 +95,10 @@ class GameServersModel(Model):
                 "maximum": 600,
                 "minimum": 5,
                 "propertyOrder": 3,
-                "default": 60
+                "default": 60,
+                "options": {
+                    "grid_columns": 4
+                }
             },
             "token": {
                 "title": "Access token",
@@ -130,7 +140,8 @@ class GameServersModel(Model):
                     "disable_edit_json": True,
                     "disable_properties": True,
                     "disable_collapse": False,
-                    "collapsed": True
+                    "collapsed": True,
+                    "grid_columns": 12
                 },
                 "propertyOrder": 4
             },
@@ -146,7 +157,8 @@ class GameServersModel(Model):
                 "options":
                 {
                     "disable_collapse": False,
-                    "collapsed": True
+                    "collapsed": True,
+                    "grid_columns": 12
                 },
                 "propertyOrder": 5
             },
@@ -161,7 +173,10 @@ class GameServersModel(Model):
                                "[ * Application Command Line Arguments * ]",
                 "type": "array",
                 "format": "table",
-                "propertyOrder": 6
+                "propertyOrder": 6,
+                "options": {
+                    "grid_columns": 12
+                }
             },
             "env": {
                 "items": {
@@ -182,7 +197,10 @@ class GameServersModel(Model):
                 "title": "Environment Variables",
                 "type": "array",
                 "format": "table",
-                "propertyOrder": 7
+                "propertyOrder": 7,
+                "options": {
+                    "grid_columns": 12
+                }
             }
         },
         "options":

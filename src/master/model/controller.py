@@ -23,10 +23,7 @@ class ControllersClientModel(object):
         self.internal = Internal()
 
     @coroutine
-    def joined(self, gamespace, room_id, key=None, extend_token=None, extend_scopes=None, **payload):
-
-        if not key:
-            raise ControllerError("No key field")
+    def joined(self, gamespace, room_id, key, extend_token=None, extend_scopes=None, **payload):
 
         try:
             access_token = yield self.rooms.approve_join(gamespace, room_id, key)

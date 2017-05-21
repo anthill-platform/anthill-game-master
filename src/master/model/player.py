@@ -148,16 +148,10 @@ class Player(object):
             logging.info("Created a room: '{0}'".format(self.room_id))
 
             try:
-                combined_settings = {
-                    "game": self.game_settings,
-                    "server": self.server_settings,
-                    "room": room_settings
-                }
-
                 result = yield self.rooms.spawn_server(
                     self.gamespace, self.game_name, self.game_version, self.game_server_name,
-                    deployment_id, self.room_id, host, combined_settings
-                )
+                    deployment_id, self.room_id, host, self.game_settings, self.server_settings,
+                    room_settings)
             except RoomError as e:
                 # failed to spawn a server, then leave
                 # this will likely to cause the room to be deleted
@@ -446,16 +440,10 @@ class PlayersGroup(object):
         logging.info("Created a room: '{0}'".format(self.room_id))
 
         try:
-            combined_settings = {
-                "game": self.game_settings,
-                "server": self.server_settings,
-                "room": room_settings
-            }
-
             result = yield self.rooms.spawn_server(
                 self.gamespace, self.game_name, self.game_version, self.game_server_name,
-                deployment_id, self.room_id, host, combined_settings
-            )
+                deployment_id, self.room_id, host, self.game_settings, self.server_settings,
+                room_settings)
         except RoomError as e:
             # failed to spawn a server, then leave
             # this will likely to cause the room to be deleted

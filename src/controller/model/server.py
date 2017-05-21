@@ -183,47 +183,13 @@ class GameServer(object):
             "game:max_players": str(max_players)
         }
 
-        token = game_settings.get("token", {})
-        authenticate = token.get("authenticate", False)
+        token = game_settings.get("token", None)
+        if token:
+            env["login:access_token"] = token
 
-        if authenticate:
-            self.__notify__(u"Authenticating for server-side use.")
-
-            username = token.get("username")
-            password = token.get("password")
-            scopes = token.get("scopes", "")
-
-            if not username:
-                raise SpawnError("No 'token.username' field.")
-
-            internal = Internal()
-
-            try:
-                access_token = yield internal.request(
-                    "login", "authenticate",
-                    credential="dev", username=username, key=password, scopes=scopes,
-                    gamespace_id=self.room.gamespace, unique="false")
-            except InternalError as e:
-                yield self.crashed(
-                    u"Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
-
-                raise SpawnError("Failed to authenticate for server-side access token: " + str(e.code) + ": " + e.body)
-            else:
-                self.__notify__(u"Authenticated for server-side use!")
-                env["login:access_token"] = access_token["token"]
-
-        discover = game_settings.get("discover", [])
-
+        discover = game_settings.get("discover", None)
         if discover:
-            self.__notify__(u"Discovering services for server-side use.")
-
-            try:
-                services = yield common.discover.cache.get_services(discover, network="external")
-            except DiscoveryError as e:
-                yield self.crashed("Failed to discover services for server-side use: " + str(e.code) + " " + e.message)
-                raise SpawnError("Failed to discover services for server-side use: " + e.message)
-            else:
-                env["discovery:services"] = ujson.dumps(services, escape_forward_slashes=False)
+            env["discovery:services"] = ujson.dumps(discover, escape_forward_slashes=False)
 
         raise Return(env)
 
