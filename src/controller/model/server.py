@@ -369,6 +369,8 @@ class GameServer(object):
 
         self.set_status(reason)
 
+        yield self.release()
+
         self.__notify__(u"Stopped.")
         self.log.flush()
 
@@ -381,8 +383,6 @@ class GameServer(object):
         yield self.gs.server_stopped(self)
 
         self.log.flush()
-
-        yield self.release()
 
     @coroutine
     def release(self):

@@ -146,6 +146,10 @@ class PortsPool(object):
         self.ports = list(range(port_from, port_to))
 
     def acquire(self):
+
+        if not self.ports:
+            raise PoolError("No ports in pool left")
+
         try:
             return self.ports.pop(random.randrange(len(self.ports)))
         except KeyError:
