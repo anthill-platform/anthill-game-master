@@ -268,9 +268,9 @@ class Process(object):
             # And by the way, it is the responsibility of the reader threads
             # to close the pipes from the subprocess, not our.
             if self.__process.stdout:
-                self.__stdout_thread.join()
+                self.__stdout_thread.join(timeout=1.0)
             if self.__process.stderr:
-                self.__stderr_thread.join()
+                self.__stderr_thread.join(timeout=1.0)
         return exitstatus
 
     def write(self, data):
