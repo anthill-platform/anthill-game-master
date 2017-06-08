@@ -223,7 +223,7 @@ class DeploymentModel(Model):
         raise Return((map(DeploymentAdapter, deployments), pages))
 
     @coroutine
-    @validate(gamespace_id="int", game_name="str", game_version="str_or_none")
+    @validate(gamespace_id="int", game_name="str", game_version="str")
     def list_deployments(self, gamespace_id, game_name, game_version=None):
         try:
             if game_version:
