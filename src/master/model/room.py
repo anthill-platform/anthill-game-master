@@ -10,6 +10,7 @@ import common.discover
 
 from common.internal import Internal, InternalError
 from common.discover import DiscoveryError
+from common.validate import validate
 from common import random_string
 
 from gameserver import GameServerAdapter
@@ -30,6 +31,28 @@ class RoomError(Exception):
 
 class RoomNotFound(Exception):
     pass
+
+
+class PlayerRecordAdapter(object):
+    def __init__(self, data):
+        self.room_id = str(data.get("room_id"))
+        self.game_name = data.get("game_name")
+        self.game_version = data.get("game_version")
+        self.game_server = data.get("game_server_name")
+        self.players = data.get("players", 0)
+        self.max_players = data.get("max_players", 8)
+        self.room_settings = data.get("settings", {})
+
+    def dump(self):
+        return {
+            "id": str(self.room_id),
+            "settings": self.room_settings,
+            "players": self.players,
+            "game_name": self.game_name,
+            "game_version": self.game_version,
+            "max_players": self.max_players,
+            "game_server": self.game_server
+        }
 
 
 class RoomAdapter(object):
@@ -275,6 +298,67 @@ class RoomsModel(Model):
             raise RoomError("Failed to get players count: " + e.args[1])
 
         raise Return(count["count"])
+
+    @coroutine
+    def list_player_records(self, gamespace, account_id):
+        try:
+            player_records = yield self.db.query(
+                """
+                SELECT `players`.`room_id`, 
+                       `rooms`.`game_name`, 
+                       `rooms`.`game_version`, 
+                       `rooms`.`players`, 
+                       `rooms`.`max_players`, 
+                       `rooms`.`settings`,
+                       `game_servers`.`game_server_name`
+                FROM `players`, `rooms`, `game_servers`
+                WHERE `players`.`gamespace_id`=%s AND `account_id`=%s AND `players`.`state`='JOINED' AND 
+                    `rooms`.`room_id`=`players`.`room_id` AND `rooms`.`state`='SPAWNED' AND
+                    `game_servers`.`game_server_id`=`rooms`.`game_server_id`;
+                """, gamespace, account_id
+            )
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to get players count: " + e.args[1])
+        else:
+            raise Return(map(PlayerRecordAdapter, player_records))
+
+    @coroutine
+    @validate(gamespace="int", account_ids="json_list_of_ints")
+    def list_players_records(self, gamespace, account_ids):
+
+        if not account_ids:
+            raise Return({})
+
+        try:
+            player_records = yield self.db.query(
+                """
+                SELECT `players`.`account_id`,
+                       `players`.`room_id`, 
+                       `rooms`.`game_name`, 
+                       `rooms`.`game_version`, 
+                       `rooms`.`players`, 
+                       `rooms`.`max_players`, 
+                       `rooms`.`settings`,
+                       `game_servers`.`game_server_name`
+                FROM `players`, `rooms`, `game_servers`
+                WHERE `players`.`gamespace_id`=%s AND `account_id` IN %s AND `players`.`state`='JOINED' AND 
+                    `rooms`.`room_id`=`players`.`room_id` AND `rooms`.`state`='SPAWNED' AND
+                    `game_servers`.`game_server_id`=`rooms`.`game_server_id`;
+                """, gamespace, account_ids
+            )
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to get players count: " + e.args[1])
+        else:
+
+            result = {
+                account_id: []
+                for account_id in account_ids
+            }
+
+            for record in player_records:
+                result[record["account_id"]].append(PlayerRecordAdapter(record))
+
+            raise Return(result)
 
     @coroutine
     def __insert_player__(self, gamespace, account_id, room_id, host_id, key, access_token, db, trigger_remove=True):

@@ -5,6 +5,7 @@ from tornado.web import HTTPError
 
 from common.access import scoped, internal, AccessToken, remote_ip
 from common.handler import AuthenticatedHandler
+from common.validate import ValidationError
 
 from model.host import RegionNotFound, HostNotFound, HostError, RegionError
 from model.controller import ControllerError
@@ -428,4 +429,57 @@ class StatusHandler(AuthenticatedHandler):
 
         self.dumps({
             "players": players_count
+        })
+
+
+class PlayerRecordsHandler(AuthenticatedHandler):
+    @scoped(scopes=["game"])
+    @coroutine
+    def get(self):
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+        account_id = self.token.account
+
+        try:
+            players_records = yield self.application.rooms.list_player_records(
+                gamespace, account_id)
+        except RoomError as e:
+            raise HTTPError(500, e.message)
+
+        self.dumps({
+            "records": [
+                players_record.dump()
+                for players_record in players_records
+            ]
+        })
+
+
+class MultiplePlayersRecordsHandler(AuthenticatedHandler):
+    @scoped(scopes=["game"])
+    @coroutine
+    def get(self):
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            account_ids = ujson.loads(self.get_argument("accounts"))
+        except (KeyError, ValueError):
+            raise HTTPError(400, "Corrupted 'accounts' JSON")
+
+        try:
+            players_records = yield self.application.rooms.list_players_records(
+                gamespace, account_ids)
+        except ValueError as e:
+            raise HTTPError(400, e.message)
+        except RoomError as e:
+            raise HTTPError(500, e.message)
+
+        self.dumps({
+            "records": {
+                account_id: [
+                    r.dump()
+                    for r in player_records
+                ]
+                for account_id, player_records in players_records.iteritems()
+            }
         })

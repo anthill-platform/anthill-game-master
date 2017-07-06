@@ -110,6 +110,8 @@ class GameMasterServer(common.server.Server):
             (r"/create/multi/(.*)/(.*)/(.*)", h.CreateMultiHandler),
             (r"/create/(.*)/(.*)/(.*)", h.CreateHandler),
             (r"/status", h.StatusHandler),
+            (r"/players", h.MultiplePlayersRecordsHandler),
+            (r"/player/(.*)", h.PlayerRecordsHandler),
             (r"/regions", h.RegionsHandler)
         ]
 

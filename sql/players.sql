@@ -10,6 +10,5 @@ CREATE TABLE `players` (
   PRIMARY KEY (`record_id`),
   KEY `room_id` (`room_id`),
   KEY `key` (`key`),
-  KEY `account_id` (`account_id`),
-  KEY `gamespace_id` (`gamespace_id`)
+  KEY `gamespace_id` (`gamespace_id`,`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
