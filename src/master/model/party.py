@@ -780,7 +780,7 @@ class PartyModel(Model):
         return self.db
 
     def get_setup_tables(self):
-        return ["parties"]
+        return ["parties", "party_members"]
 
     @coroutine
     @validate(gamespace_id="int", game_name="str_name", game_version="str_name", game_server_name="str_name",

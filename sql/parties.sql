@@ -1,4 +1,4 @@
-CREACREATE TABLE `parties` (
+CREATE TABLE `parties` (
   `party_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `gamespace_id` int(10) unsigned NOT NULL,
   `party_num_members` int(11) NOT NULL DEFAULT '2',
