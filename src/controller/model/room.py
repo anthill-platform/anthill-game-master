@@ -68,6 +68,9 @@ class Room(object):
     def server_settings(self):
         return self.settings["server"]
 
+    def other_settings(self):
+        return self.settings.get("other", None)
+
 
 class RoomSlot(object):
     pass

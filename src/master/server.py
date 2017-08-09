@@ -19,6 +19,7 @@ from model.host import HostsModel
 from model.deploy import DeploymentModel
 from model.ban import BansModel
 from model.heartbeat import HeartbeatModel
+from model.party import PartyModel
 
 import options as _opts
 
@@ -55,8 +56,11 @@ class GameMasterServer(common.server.Server):
             "create_room": options.rate_create_room
         })
 
+        self.parties = PartyModel(self.db, self.gameservers, self.deployments,
+                                  self.ratelimit, self.hosts, self.rooms)
+
     def get_models(self):
-        return [self.hosts, self.rooms, self.gameservers, self.deployments, self.bans, self.heartbeat]
+        return [self.hosts, self.rooms, self.gameservers, self.deployments, self.bans, self.heartbeat, self.parties]
 
     def get_admin(self):
         return {
@@ -112,7 +116,12 @@ class GameMasterServer(common.server.Server):
             (r"/status", h.StatusHandler),
             (r"/players", h.MultiplePlayersRecordsHandler),
             (r"/player/(.*)", h.PlayerRecordsHandler),
-            (r"/regions", h.RegionsHandler)
+            (r"/regions", h.RegionsHandler),
+            (r"/parties/(.*)/(.*)/(.*)/session", h.PartiesSearchHandler),
+            (r"/party/create/(.*)/(.*)/(.*)/session", h.CreatePartySessionHandler),
+            (r"/party/create/(.*)/(.*)/(.*)", h.CreatePartySimpleHandler),
+            (r"/party/(.*)/session", h.PartySessionHandler),
+            (r"/party/(.*)", h.SimplePartyHandler)
         ]
 
 

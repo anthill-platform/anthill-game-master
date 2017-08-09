@@ -110,3 +110,11 @@ define("heartbeat_time",
        default=30,
        help="Heartbeat periods (how ofter to check controllers)",
        type=int)
+
+# Rabbitmq
+
+define("party_broker",
+       default="amqp://anthill:anthill@127.0.0.1:5672/dev",
+       help="RabbitMQ broker location for party messaging (amqp).",
+       group="message",
+       type=str)

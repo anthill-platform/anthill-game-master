@@ -875,7 +875,7 @@ class RoomsModel(Model):
     @coroutine
     def instantiate(self, gamespace, game_id, game_version, game_server_name,
                     deployment_id, room_id, server_host, game_settings, server_settings,
-                    room_settings):
+                    room_settings, other_settings=None):
 
         yield self.__prepare__(gamespace, game_settings)
 
@@ -884,6 +884,9 @@ class RoomsModel(Model):
             "server": server_settings,
             "room": room_settings
         }
+
+        if other_settings:
+            settings["other"] = other_settings
 
         try:
             result = yield self.internal.post(
@@ -1166,12 +1169,12 @@ class RoomsModel(Model):
 
     @coroutine
     def spawn_server(self, gamespace, game_id, game_version, game_server_name, deployment_id,
-                     room_id, host, game_settings, server_settings, room_settings):
+                     room_id, host, game_settings, server_settings, room_settings, other_settings=None):
 
         result = yield self.instantiate(
             gamespace, game_id, game_version, game_server_name,
             deployment_id, room_id, host.internal_location,
-            game_settings, server_settings, room_settings)
+            game_settings, server_settings, room_settings, other_settings)
 
         if "location" not in result:
             raise RoomError("No location in result.")

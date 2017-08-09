@@ -24,7 +24,7 @@ class DebugController(a.StreamAdminController):
 
     @coroutine
     def log(self, name, data):
-        yield self.rpc(self, "log", name=name, data=data)
+        yield self.send_rpc(self, "log", name=name, data=data)
 
     @coroutine
     def send_stdin(self, server, data):
@@ -39,7 +39,7 @@ class DebugController(a.StreamAdminController):
 
     @coroutine
     def new_server(self, server):
-        yield self.rpc(self, "new_server", **DebugController.serialize_server(server))
+        yield self.send_rpc(self, "new_server", **DebugController.serialize_server(server))
 
     @coroutine
     def closed(self):
@@ -51,7 +51,7 @@ class DebugController(a.StreamAdminController):
         servers = self.gs.get_servers()
 
         result = [DebugController.serialize_server(server) for server_name, server in servers.iteritems()]
-        yield self.rpc(self, "servers", result)
+        yield self.send_rpc(self, "servers", result)
 
         self.sub.subscribe(self.gs.pub, ["new_server", "server_removed", "server_updated"])
 
@@ -81,11 +81,11 @@ class DebugController(a.StreamAdminController):
     @coroutine
     def server_removed(self, server):
         server.pub.unsubscribe(["log"], self)
-        yield self.rpc(self, "server_removed", **DebugController.serialize_server(server))
+        yield self.send_rpc(self, "server_removed", **DebugController.serialize_server(server))
 
     @coroutine
     def server_updated(self, server):
-        yield self.rpc(self, "server_updated", **DebugController.serialize_server(server))
+        yield self.send_rpc(self, "server_updated", **DebugController.serialize_server(server))
 
     @coroutine
     def subscribe_logs(self, server):

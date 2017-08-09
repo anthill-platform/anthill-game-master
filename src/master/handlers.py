@@ -4,14 +4,16 @@ from tornado.gen import coroutine, Return
 from tornado.web import HTTPError
 
 from common.access import scoped, internal, AccessToken, remote_ip
-from common.handler import AuthenticatedHandler
+from common.handler import AuthenticatedHandler, JsonRPCWSHandler
 from common.validate import ValidationError
+from common.internal import InternalError
+from common.jsonrpc import JsonRPCError, JsonRPCTimeout
 
 from model.host import RegionNotFound, HostNotFound, HostError, RegionError
 from model.controller import ControllerError
 from model.player import Player, PlayersGroup, RoomNotFound, PlayerError, RoomError, PlayerBanned
 from model.gameserver import GameServerNotFound
-from common.internal import InternalError
+from model.party import PartySession, PartyError, NoSuchParty, PartyFlags
 
 import logging
 
@@ -483,3 +485,491 @@ class MultiplePlayersRecordsHandler(AuthenticatedHandler):
                 for account_id, player_records in players_records.iteritems()
             }
         })
+
+
+class PartyHandler(JsonRPCWSHandler):
+    def __init__(self, application, request, **kwargs):
+        super(PartyHandler, self).__init__(application, request, **kwargs)
+        self.session = None
+
+    @coroutine
+    def _on_message(self, message_type, payload):
+
+        try:
+            yield self.send_request(
+                self,
+                "message",
+                message_type=message_type,
+                payload=payload)
+        except JsonRPCTimeout:
+            logging.error("Timeout during _on_message request")
+        except JsonRPCError:
+            pass
+
+    @coroutine
+    def _on_close(self, code, reason):
+        self.close(code, reason)
+
+    @coroutine
+    def _inited(self):
+        self.session.set_on_message(self._on_message)
+        self.session.set_on_close(self._on_close)
+
+        logging.info("Party session gs:{0} pt:{1} acc:{2} started.".format(
+            self.session.gamespace_id,
+            self.session.party.id,
+            self.session.account_id
+        ))
+
+        yield self.send_rpc(
+            self,
+            "party",
+            party_info=self.session.dump())
+
+    @coroutine
+    def send_message(self, payload):
+
+        try:
+            result = yield self.session.send_message(PartySession.MESSAGE_TYPE_CUSTOM, payload)
+        except PartyError as e:
+            raise JsonRPCError(e.code, e.message)
+
+        raise Return(result)
+
+    @coroutine
+    def close_party(self, message):
+
+        try:
+            result = yield self.session.close_party(message)
+        except NoSuchParty:
+            raise JsonRPCError(404, "No such party to close.")
+        except PartyError as e:
+            raise JsonRPCError(e.code, e.message)
+
+        raise Return(result)
+
+    @coroutine
+    def join_party(self, member_profile, check_members=None):
+
+        try:
+            result = yield self.session.join_party(member_profile, check_members=check_members)
+        except NoSuchParty:
+            raise JsonRPCError(404, "No such party to start game.")
+        except PartyError as e:
+            raise JsonRPCError(e.code, e.message)
+
+        raise Return(result)
+
+    @coroutine
+    def leave_party(self):
+
+        try:
+            result = yield self.session.leave_party()
+        except NoSuchParty:
+            raise JsonRPCError(404, "No such party to start game.")
+        except PartyError as e:
+            raise JsonRPCError(e.code, e.message)
+
+        raise Return(result)
+
+    @coroutine
+    def start_game(self, message):
+
+        try:
+            result = yield self.session.start_game(message)
+        except NoSuchParty:
+            raise JsonRPCError(404, "No such party to start game.")
+        except PartyError as e:
+            raise JsonRPCError(e.code, e.message)
+
+        raise Return(result)
+
+    @coroutine
+    def closed(self):
+        if not self.session:
+            return
+
+        yield self.session.release()
+        logging.info("Party session gs:{0} pt:{1} acc:{2} closed.".format(
+            self.session.gamespace_id,
+            self.session.party.id,
+            self.session.account_id
+        ))
+        self.session = None
+
+
+class CreatePartySimpleHandler(AuthenticatedHandler):
+    @scoped(scopes=["party_create"])
+    @coroutine
+    def post(self, game_name, game_version, game_server_name):
+        parties = self.application.parties
+        hosts = self.application.hosts
+
+        try:
+            party_settings = ujson.loads(self.get_argument("party_settings", "{}"))
+        except (KeyError, ValueError):
+            raise HTTPError(400, "Corrupted party settings")
+
+        try:
+            room_settings = ujson.loads(self.get_argument("room_settings", "{}"))
+        except (KeyError, ValueError):
+            raise HTTPError(400, "Corrupted room settings")
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        close_callback = self.get_argument("close_callback", None)
+        max_members = self.get_argument("max_members", 8)
+        selected_region = self.get_argument("region", None)
+        my_region = None
+
+        party_flags = PartyFlags()
+
+        if self.get_argument("auto_start", "true") == "true":
+            party_flags.set(PartyFlags.AUTO_START)
+        if self.get_argument("auto_close", "true") == "true":
+            party_flags.set(PartyFlags.AUTO_CLOSE)
+
+        if selected_region:
+            try:
+                my_region = yield hosts.find_region(selected_region)
+            except RegionNotFound:
+                raise HTTPError(404, "No such region")
+        else:
+            ip = remote_ip(self.request)
+
+            if ip is None:
+                raise HTTPError(400, "Bad IP")
+
+            geo = geolite2.lookup(ip)
+
+            if geo:
+                p_lat, p_long = geo.location
+
+                try:
+                    my_region = yield hosts.get_closest_region(p_long, p_lat)
+                except RegionNotFound:
+                    pass
+
+        if not my_region:
+            try:
+                my_region = yield hosts.get_default_region()
+            except RegionNotFound:
+                raise HTTPError(410, "No default region defined")
+
+        try:
+            session = yield parties.create_empty_party(
+                gamespace, game_name, game_version, game_server_name,
+                my_region.region_id, party_settings, room_settings, max_members,
+                party_flags=party_flags, close_callback=close_callback)
+        except ValidationError as e:
+            raise HTTPError(400, e.message)
+        except PartyError as e:
+            raise HTTPError(e.code, e.message)
+        except NoSuchParty:
+            raise HTTPError(404, "No such party")
+
+        self.dumps({
+            "party": session.dump()
+        })
+
+
+class CreatePartySessionHandler(PartyHandler):
+
+    def __init__(self, application, request, **kwargs):
+        super(CreatePartySessionHandler, self).__init__(application, request, **kwargs)
+
+    def required_scopes(self):
+        return ["party_create"]
+
+    def check_origin(self, origin):
+        return True
+
+    @coroutine
+    def opened(self, game_name, game_version, game_server_name, *ignored, **ignored_kw):
+
+        parties = self.application.parties
+        hosts = self.application.hosts
+
+        party_flags = PartyFlags()
+
+        if self.get_argument("auto_start", "true") == "true":
+            party_flags.set(PartyFlags.AUTO_START)
+        if self.get_argument("auto_close", "true") == "true":
+            party_flags.set(PartyFlags.AUTO_CLOSE)
+
+        try:
+            party_settings = ujson.loads(self.get_argument("party_settings", "{}"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted party settings")
+
+        try:
+            room_settings = ujson.loads(self.get_argument("room_settings", "{}"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted room settings")
+
+        auto_join = self.get_argument("auto_join", "true") == "true"
+
+        if auto_join:
+            try:
+                member_profile = ujson.loads(self.get_argument("member_profile", "{}"))
+            except (KeyError, ValueError):
+                raise HTTPError(3400, "Corrupted member profile settings")
+        else:
+            member_profile = None
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+        account_id = self.token.account
+
+        close_callback = self.get_argument("close_callback", None)
+        max_members = self.get_argument("max_members", 8)
+        selected_region = self.get_argument("region", None)
+        my_region = None
+
+        if selected_region:
+            try:
+                my_region = yield hosts.find_region(selected_region)
+            except RegionNotFound:
+                raise HTTPError(3404, "No such region")
+        else:
+            ip = remote_ip(self.request)
+
+            if ip is None:
+                raise HTTPError(3400, "Bad IP")
+
+            geo = geolite2.lookup(ip)
+
+            if geo:
+                p_lat, p_long = geo.location
+
+                try:
+                    my_region = yield hosts.get_closest_region(p_long, p_lat)
+                except RegionNotFound:
+                    pass
+
+        if not my_region:
+            try:
+                my_region = yield hosts.get_default_region()
+            except RegionNotFound:
+                raise HTTPError(3410, "No default region defined")
+
+        try:
+            self.session = yield parties.create_party(
+                gamespace, game_name, game_version, game_server_name,
+                my_region.region_id, party_settings, room_settings, max_members,
+                account_id, member_profile, self.token.key,
+                party_flags=party_flags, auto_join=auto_join, close_callback=close_callback)
+        except ValidationError as e:
+            raise HTTPError(3400, e.message)
+        except PartyError as e:
+            raise HTTPError(3000 + e.code, e.message)
+        except NoSuchParty:
+            raise HTTPError(3404, "No such party")
+        else:
+            yield self._inited()
+
+
+class PartiesSearchHandler(PartyHandler):
+
+    def __init__(self, application, request, **kwargs):
+        super(PartiesSearchHandler, self).__init__(application, request, **kwargs)
+
+    def required_scopes(self):
+        return ["party"]
+
+    def check_origin(self, origin):
+        return True
+
+    @coroutine
+    def opened(self, game_name, game_version, game_server_name, *ignored, **ignored_kw):
+
+        parties = self.application.parties
+        hosts = self.application.hosts
+
+        try:
+            party_filter = ujson.loads(self.get_argument("party_filter"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted party filter")
+
+        try:
+            party_settings = ujson.loads(self.get_argument("create_party_settings", "{}"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted party settings")
+
+        try:
+            room_settings = ujson.loads(self.get_argument("create_room_settings", "{}"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted room settings")
+
+        try:
+            member_profile = ujson.loads(self.get_argument("member_profile", "{}"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted member profile settings")
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+        account_id = self.token.account
+
+        create_party_flags = PartyFlags()
+
+        if self.get_argument("create_auto_start", "true") == "true":
+            create_party_flags.set(PartyFlags.AUTO_START)
+        if self.get_argument("create_auto_close", "true") == "true":
+            create_party_flags.set(PartyFlags.AUTO_CLOSE)
+
+        close_callback = self.get_argument("create_close_callback", None)
+        max_members = self.get_argument("max_members", 8)
+        selected_region = self.get_argument("region", None)
+        auto_create = self.get_argument("auto_create", "false") == "true"
+        my_region = None
+
+        if auto_create and (not self.token.has_scopes(["party_create"])):
+            raise HTTPError(3403, "Scope 'party_create' is required if 'auto_create' is true.")
+
+        if selected_region:
+            try:
+                my_region = yield hosts.find_region(selected_region)
+            except RegionNotFound:
+                raise HTTPError(3404, "No such region")
+        else:
+            ip = remote_ip(self.request)
+
+            if ip is None:
+                raise HTTPError(3400, "Bad IP")
+
+            geo = geolite2.lookup(ip)
+
+            if geo:
+                p_lat, p_long = geo.location
+
+                try:
+                    my_region = yield hosts.get_closest_region(p_long, p_lat)
+                except RegionNotFound:
+                    pass
+
+        if not my_region:
+            try:
+                my_region = yield hosts.get_default_region()
+            except RegionNotFound:
+                raise HTTPError(3410, "No default region defined")
+
+        try:
+            self.session = yield parties.join_party(
+                gamespace, game_name, game_version, game_server_name,
+                my_region.region_id, party_filter, account_id,
+                member_profile, self.token.key,
+                auto_create, party_settings, room_settings, max_members,
+                create_flags=create_party_flags, create_close_callback=close_callback)
+        except ValidationError as e:
+            raise HTTPError(3400, e.message)
+        except PartyError as e:
+            raise HTTPError(3000 + e.code, e.message)
+        except NoSuchParty:
+            raise HTTPError(3404, "No such party")
+        else:
+            yield self._inited()
+
+    @coroutine
+    def closed(self):
+        if not self.session:
+            return
+
+        yield self.session.release()
+        self.session = None
+
+
+class PartySessionHandler(PartyHandler):
+
+    def __init__(self, application, request, **kwargs):
+        super(PartySessionHandler, self).__init__(application, request, **kwargs)
+
+    def required_scopes(self):
+        return ["party"]
+
+    def check_origin(self, origin):
+        return True
+
+    @coroutine
+    def opened(self, party_id, *ignored, **ignored_kw):
+
+        parties = self.application.parties
+
+        auto_join = self.get_argument("auto_join", "true") == "true"
+
+        try:
+            check_members = ujson.loads(self.get_argument("check_members", "null"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted member profile settings")
+
+        if auto_join:
+            try:
+                member_profile = ujson.loads(self.get_argument("member_profile", "{}"))
+            except (KeyError, ValueError):
+                raise HTTPError(3400, "Corrupted member profile settings")
+        else:
+            member_profile = None
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+        account_id = self.token.account
+
+        try:
+            self.session = yield parties.party_session(
+                gamespace, party_id, account_id, self.token.key,
+                member_profile=member_profile, check_members=check_members, auto_join=auto_join)
+        except ValidationError as e:
+            raise HTTPError(3400, e.message)
+        except PartyError as e:
+            raise HTTPError(3000 + e.code, e.message)
+        except NoSuchParty:
+            raise HTTPError(3404, "No such party")
+        else:
+            yield self._inited()
+
+    @coroutine
+    def closed(self):
+        if not self.session:
+            return
+
+        yield self.session.release()
+        self.session = None
+
+
+class SimplePartyHandler(AuthenticatedHandler):
+
+    @scoped(scopes=["party"])
+    @coroutine
+    def get(self, party_id):
+        parties = self.application.parties
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            party = yield parties.get_party(gamespace, party_id)
+        except NoSuchParty:
+            raise HTTPError(404, "No such party")
+        except PartyError as e:
+            raise HTTPError(e.code, e.message)
+
+        self.dumps({
+            "party": party.dump()
+        })
+
+    @scoped(scopes=["party_close"])
+    @coroutine
+    def delete(self, party_id):
+        parties = self.application.parties
+
+        try:
+            message = ujson.loads(self.get_argument("message", "{}"))
+        except (KeyError, ValueError):
+            raise HTTPError(400, "Corrupted party settings")
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            result = yield parties.close_party(gamespace, party_id, message)
+        except ValidationError as e:
+            raise HTTPError(400, e.message)
+        except PartyError as e:
+            raise HTTPError(e.code, e.message)
+        except NoSuchParty:
+            raise HTTPError(404, "No such party")
+
+        self.dumps(result or {})

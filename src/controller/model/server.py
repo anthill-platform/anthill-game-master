@@ -136,7 +136,7 @@ class GameServer(object):
     @coroutine
     def __check_status__(self):
         try:
-            response = yield self.msg.request(self, "status")
+            response = yield self.msg.send_request(self, "status")
         except common.jsonrpc.JsonRPCTimeout:
             self.__notify__(u"Timeout to check status")
             yield self.terminate(False)
@@ -174,6 +174,7 @@ class GameServer(object):
         room_settings = room.room_settings()
         server_settings = room.server_settings()
         game_settings = room.game_settings()
+        other_settings = room.other_settings()
 
         max_players = game_settings.get("max_players", 8)
 
@@ -182,6 +183,13 @@ class GameServer(object):
             "room:settings": ujson.dumps(room_settings),
             "game:max_players": str(max_players)
         }
+
+        if other_settings:
+            for key, value in other_settings.iteritems():
+                if isinstance(value, dict):
+                    env[key] = ujson.dumps(value)
+                else:
+                    env[key] = str(value)
 
         token = game_settings.get("token", None)
         if token:
