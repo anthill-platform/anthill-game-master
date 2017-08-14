@@ -217,9 +217,18 @@ class PartySession(object):
 
         logging.info("Created a room: '{0}'".format(self.room_id))
 
+        party_members = {
+            member.account: {
+                "profile": member.profile,
+                "role": member.role
+            }
+            for member in members
+        }
+
         other_settings = {
             "party:id": str(party.id),
-            "party:settings": ujson.dumps(party.settings)
+            "party:settings": ujson.dumps(party.settings),
+            "party:members": ujson.dumps(party_members)
         }
 
         try:
