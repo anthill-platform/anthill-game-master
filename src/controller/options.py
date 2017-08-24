@@ -4,18 +4,18 @@ from common.options import define
 # Main
 
 define("host",
-       default="http://game-ctl-dev.anthill",
+       default="http://localhost:9509",
        help="Public hostname of this service",
        type=str)
 
 define("gs_host",
-       default="game-ctl-dev.anthill",
-       help="Public hostname of this service for games (without protocol)",
+       default="localhost",
+       help="Public hostname without protocol and port (for application usage)",
        type=str)
 
 define("listen",
-       default="port:11600",
-       help="Socket to listen. Could be a port number (port:N), or a unix domain socket (unix:PATH)",
+       default="unix:/usr/local/var/run/anthill/dev_game_ctl.sock",
+       help="Public hostname of this service for games (without protocol)",
        type=str)
 
 define("name",
