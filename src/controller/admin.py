@@ -42,11 +42,11 @@ class DebugController(a.StreamAdminController):
         yield self.send_rpc(self, "new_server", **DebugController.serialize_server(server))
 
     @coroutine
-    def closed(self):
+    def on_closed(self):
         self.sub.unsubscribe_all()
 
     @coroutine
-    def opened(self, *args, **kwargs):
+    def on_opened(self, *args, **kwargs):
 
         servers = self.gs.get_servers()
 

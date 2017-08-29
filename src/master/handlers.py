@@ -585,7 +585,7 @@ class PartyHandler(JsonRPCWSHandler):
         raise Return(result)
 
     @coroutine
-    def closed(self):
+    def on_closed(self):
         if not self.session:
             return
 
@@ -685,7 +685,7 @@ class CreatePartySessionHandler(PartyHandler):
         return True
 
     @coroutine
-    def opened(self, game_name, game_version, game_server_name, *ignored, **ignored_kw):
+    def on_opened(self, game_name, game_version, game_server_name, *ignored, **ignored_kw):
 
         parties = self.application.parties
         hosts = self.application.hosts
@@ -780,7 +780,7 @@ class PartiesSearchHandler(PartyHandler):
         return True
 
     @coroutine
-    def opened(self, game_name, game_version, game_server_name, *ignored, **ignored_kw):
+    def on_opened(self, game_name, game_version, game_server_name, *ignored, **ignored_kw):
 
         parties = self.application.parties
         hosts = self.application.hosts
@@ -868,7 +868,7 @@ class PartiesSearchHandler(PartyHandler):
             yield self._inited()
 
     @coroutine
-    def closed(self):
+    def on_closed(self):
         if not self.session:
             return
 
@@ -888,7 +888,7 @@ class PartySessionHandler(PartyHandler):
         return True
 
     @coroutine
-    def opened(self, party_id, *ignored, **ignored_kw):
+    def on_opened(self, party_id, *ignored, **ignored_kw):
 
         parties = self.application.parties
 
@@ -924,7 +924,7 @@ class PartySessionHandler(PartyHandler):
             yield self._inited()
 
     @coroutine
-    def closed(self):
+    def on_closed(self):
         if not self.session:
             return
 
