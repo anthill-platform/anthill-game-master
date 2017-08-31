@@ -69,6 +69,20 @@ class HostsModel(Model):
         return ["regions", "hosts"]
 
     @coroutine
+    def setup_table_regions(self):
+        yield self.new_region("local", True, {})
+
+    @coroutine
+    def setup_table_hosts(self):
+
+        try:
+            region = yield self.find_region("local")
+        except RegionNotFound:
+            pass
+        else:
+            yield self.new_host("localhost", "http://localhost:9509", region.region_id, True)
+
+    @coroutine
     @validate(name="str_name", default="bool", settings="json")
     def new_region(self, name, default, settings):
         try:
