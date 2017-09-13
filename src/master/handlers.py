@@ -191,7 +191,7 @@ class JoinRoomHandler(AuthenticatedHandler):
 
         try:
             record_id, key, room = yield self.application.rooms.join_room(
-                gamespace, game_name, room_id, account, self.token.key)
+                gamespace, game_name, room_id, account, self.token.key, {})
         except RoomNotFound:
             raise HTTPError(404, "Room not found")
         except RoomError as e:
