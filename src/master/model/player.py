@@ -22,7 +22,8 @@ class PlayerBanned(Exception):
 
 
 class Player(object):
-    def __init__(self, app, gamespace, game_name, game_version, game_server_name, account_id, access_token, ip):
+    def __init__(self, app, gamespace, game_name, game_version, game_server_name,
+                 account_id, access_token, player_info, ip):
         self.app = app
         self.hosts = app.hosts
         self.rooms = app.rooms
@@ -30,6 +31,7 @@ class Player(object):
         self.bans = app.bans
         self.gamespace = gamespace
         self.ip = ip
+        self.player_info = player_info
 
         self.game_name = game_name
         self.game_version = game_version
@@ -142,7 +144,7 @@ class Player(object):
 
             self.record_id, key, self.room_id = yield self.rooms.create_and_join_room(
                 self.gamespace, self.game_name, self.game_version,
-                self.gs, room_settings, self.account_id, self.access_token,
+                self.gs, room_settings, self.account_id, self.access_token, self.player_info,
                 host, deployment_id, False)
 
             logging.info("Created a room: '{0}'".format(self.room_id))
@@ -220,7 +222,7 @@ class Player(object):
         try:
             self.record_id, key, self.room = yield self.rooms.find_and_join_room(
                 self.gamespace, self.game_name, self.game_version, self.gs.game_server_id,
-                self.account_id, self.access_token, search_settings,
+                self.account_id, self.access_token, self.player_info, search_settings,
 
                 regions_order=regions_order,
                 region=region_lock)
@@ -432,9 +434,14 @@ class PlayersGroup(object):
         except HostNotFound:
             raise PlayerError(503, "Not enough hosts")
 
+        create_members = [
+            (token, {})
+            for token in self.tokens
+        ]
+
         records, self.room_id = yield self.rooms.create_and_join_room_multi(
             self.gamespace, self.game_name, self.game_version,
-            self.gs, room_settings, self.tokens,
+            self.gs, room_settings, create_members,
             host, deployment_id, False)
 
         logging.info("Created a room: '{0}'".format(self.room_id))

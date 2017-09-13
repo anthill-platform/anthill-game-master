@@ -1168,7 +1168,7 @@ class DebugControllerAction(a.StreamAdminController):
     """
 
     @coroutine
-    def prepared(self, server):
+    def prepared(self, server, **ignored):
         hosts = self.application.hosts
 
         try:
@@ -1181,7 +1181,7 @@ class DebugControllerAction(a.StreamAdminController):
 
 class DebugHostController(a.AdminController):
     @coroutine
-    def get(self, host_id):
+    def get(self, host_id, **ignore):
 
         hosts = self.application.hosts
 
@@ -1209,7 +1209,8 @@ class DebugHostController(a.AdminController):
                 a.link("host", data["host"].name,
                        host_id=self.context.get("host_id"))
             ], "Debug"),
-            a.script("static/admin/debug_controller.js", server=self.context.get("host_id")),
+            a.script("static/admin/debug_controller.js", server=self.context.get("host_id"),
+                     room=self.context.get("room_id")),
             a.links("Navigate", [
                 a.link("server", "Go back", icon="chevron-left", host_id=self.context.get("host_id"))
             ])
@@ -1871,6 +1872,166 @@ class NewRegionController(a.AdminController):
         return ["game_admin"]
 
 
+class SpawnRoomController(a.AdminController):
+    @coroutine
+    def get(self, game_name):
+
+        env_service = self.application.env_service
+        gameservers = self.application.gameservers
+        hosts = self.application.hosts
+
+        try:
+            app = yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        game_versions = {
+            v_name: v_name
+            for v_name, v_id in app["versions"].iteritems()
+        }
+
+        try:
+            game_servers = yield gameservers.list_game_servers(self.gamespace, game_name)
+        except GameError as e:
+            raise a.ActionError(e.message)
+
+        game_servers = {
+            game_server.game_server_id: game_server.name
+            for game_server in game_servers
+        }
+
+        try:
+            game_regions = yield hosts.list_regions()
+        except RegionError as e:
+            raise a.ActionError(e.message)
+
+        game_regions = {
+            region.region_id: region.name
+            for region in game_regions
+        }
+
+        raise Return({
+            "game_name": game_name,
+            "game_title": app["title"],
+            "game_versions": game_versions,
+            "game_servers": game_servers,
+            "game_regions": game_regions,
+            "room_settings": {},
+            "custom_settings": {},
+            "max_players": 0
+        })
+
+    @coroutine
+    @validate(game_version="str", game_server_id="int", region_id="int", room_settings="load_json_dict",
+              max_players="int", custom_settings="load_json_dict")
+    def spawn(self, game_version, game_server_id, region_id, room_settings, custom_settings, max_players=0):
+
+        env_service = self.application.env_service
+        hosts = self.application.hosts
+        rooms = self.application.rooms
+        gameservers = self.application.gameservers
+
+        game_name = self.context.get("game_name")
+
+        try:
+            yield env_service.get_app_info(self.gamespace, game_name)
+        except AppNotFound as e:
+            raise a.ActionError("App was not found.")
+
+        room_settings = {
+            key: value
+            for key, value in room_settings.iteritems()
+            if isinstance(value, (str, unicode, int, float, bool))
+        }
+
+        try:
+            deployment = yield self.application.deployments.get_current_deployment(
+                self.gamespace, game_name, game_version)
+        except NoCurrentDeployment:
+            raise a.ActionError("No deployment defined for {0}/{1}".format(
+                game_name, game_version
+            ))
+
+        if not deployment.enabled:
+            raise a.ActionError("Deployment is disabled for {0}/{1}".format(
+                game_name, game_version
+            ))
+
+        try:
+            gs = yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+        except GameServerNotFound:
+            raise a.ActionError("No such game server")
+
+        game_settings = gs.game_settings
+
+        try:
+            server_settings = yield gameservers.get_version_game_server(
+                self.gamespace, game_name, game_version, gs.game_server_id)
+        except GameVersionNotFound:
+            server_settings = gs.server_settings
+
+            if server_settings is None:
+                raise a.ActionError("No default version configuration")
+
+        deployment_id = deployment.deployment_id
+
+        try:
+            region = yield hosts.get_region(region_id)
+        except RegionNotFound:
+            raise a.ActionError("Host not found")
+
+        try:
+            host = yield hosts.get_best_host(region.region_id)
+        except HostNotFound:
+            raise a.ActionError("Not enough hosts")
+
+        room_id = yield rooms.create_room(
+            self.gamespace, game_name, game_version,
+            gs, room_settings, host, deployment_id, max_players=max_players)
+
+        logging.info("Created a room: '{0}'".format(room_id))
+
+        try:
+            result = yield rooms.spawn_server(
+                self.gamespace, game_name, game_version, gs.name,
+                deployment_id, room_id, host, game_settings, server_settings,
+                room_settings, other_settings=custom_settings)
+        except RoomError as e:
+            raise a.ActionError(e.message)
+
+        updated_room_settings = result.get("settings")
+
+        if updated_room_settings:
+            room_settings.update(updated_room_settings)
+            yield rooms.update_room_settings(self.gamespace, room_id, room_settings)
+
+        raise a.Redirect("room", message="Successfully spawned a server", room_id=room_id)
+
+    def render(self, data):
+        return [
+            a.breadcrumbs(items=[
+                a.link("app", data["game_title"], record_id=data["game_name"]),
+                a.link("rooms", "Rooms", game_name=data["game_name"]),
+            ], title="Spawn a new game server"),
+            a.form("Spawn a new game server", fields={
+                "game_version": a.field("Game Version", "select", "primary", values=data["game_versions"], order=1),
+                "game_server_id": a.field("Game Server", "select", "primary", values=data["game_servers"], order=2),
+                "region_id": a.field("Game Region",
+                                     "select", "primary", values=data["game_regions"], order=3),
+                "room_settings": a.field("Room Settings",
+                                         "json", "primary", order=4, height=120),
+                "max_players": a.field("Max Players", "text", "primary", order=5,
+                                       description="Leave 0 for default value depending on the "
+                                                   "Game Server Configuration"),
+                "custom_settings": a.field("Custom Settings",
+                                           "json", "primary", order=6, height=120,
+                                           description="Custom Environment variables to pass to the game server"),
+            }, methods={
+                "spawn": a.method("Spawn", "primary")
+            }, data=data, icon="flash")
+        ]
+
+
 class RoomController(a.AdminController):
     @coroutine
     def get(self, room_id):
@@ -1909,7 +2070,7 @@ class RoomController(a.AdminController):
             raise a.ActionError(e.message)
 
         try:
-            yield rooms.terminate_room(self.gamespace, room_id)
+            yield rooms.terminate_room(self.gamespace, room_id, room=room)
         except RoomError as e:
             raise a.ActionError(e.message)
 
@@ -1917,6 +2078,48 @@ class RoomController(a.AdminController):
             "rooms",
             message="Game has been shot down",
             game_name=room.game_name)
+
+    @coroutine
+    def execute_command(self, command, **ignored):
+        rooms = self.application.rooms
+
+        room_id = self.context.get("room_id")
+
+        try:
+            room = yield rooms.get_room(self.gamespace, room_id)
+        except RoomNotFound:
+            raise a.ActionError("No such room")
+        except RoomError as e:
+            raise a.ActionError(e.message)
+
+        try:
+            yield rooms.execute_stdin_command(self.gamespace, room_id, command, room=room)
+        except RoomError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect(
+            "room",
+            message="Command has been executed",
+            room_id=room_id)
+
+    @coroutine
+    def debug(self, **ignored):
+        rooms = self.application.rooms
+
+        room_id = self.context.get("room_id")
+
+        try:
+            room = yield rooms.get_room(self.gamespace, room_id)
+        except RoomNotFound:
+            raise a.ActionError("No such room")
+        except RoomError as e:
+            raise a.ActionError(e.message)
+
+        raise a.Redirect(
+            "debug_host",
+            service="game",
+            host_id=room.host_id,
+            room_id=room_id)
 
     def render(self, data):
         game_name = data["game_name"]
@@ -1926,10 +2129,19 @@ class RoomController(a.AdminController):
                 a.link("app", data["game_title"], record_id=game_name),
                 a.link("rooms", "Rooms", game_name=game_name)
             ], self.context.get("room_id")),
-            a.form("Actions", fields={}, methods={
-                "delete": a.method("Delete room", "danger", danger="Are you sure? Game server will be shot down "
-                                                                   "and users will be kicked out.")
-            }, data=data),
+            a.split([
+                a.form("Execute console command on a room", fields={
+                    "command": a.field("Console command", "text", "primary",
+                                       description="A console command will be delivered to the running room "
+                                                   "(game server) trough standard input")
+                }, methods={
+                    "execute_command": a.method("Execute command", "primary")
+                }, data=data, icon="code"),
+                a.form("Other actions", fields={}, methods={
+                    "delete": a.method("Delete room", "danger", order=1),
+                    "debug": a.method("Debug game server", "primary", order=2)
+                }, data=data, icon="bars")
+            ]),
             a.links("Navigate", [
                 a.link("rooms", "Go back", icon="chevron-left", game_name=game_name)
             ])
@@ -2100,6 +2312,78 @@ class RoomsController(a.AdminController):
 
         raise a.Redirect("rooms", **filters)
 
+    @coroutine
+    def delete_results(self, **args):
+
+        rooms = self.application.rooms
+
+        game_name = self.context.get("game_name")
+        page = self.context.get("page", 1)
+
+        filters = {
+            "game_name": game_name,
+            "page": page
+        }
+
+        filters.update(args)
+
+        filter_results = yield self.get(**filters)
+
+        failed_count = 0
+        deleted_count = 0
+
+        for room, game_server, region, host in filter_results["rooms"]:
+
+            try:
+                yield rooms.terminate_room(self.gamespace, room.room_id, room=room, host=host)
+            except RoomError:
+                failed_count += 1
+                logging.exception("Failed to delete room {0}".format(room.room_id))
+            else:
+                deleted_count += 1
+
+        if failed_count:
+            raise a.ActionError("Failed to delete {0} rooms".format(failed_count))
+
+        raise a.Redirect("rooms", message="Successfully deleted {0} rooms".format(deleted_count), **filters)
+
+    @coroutine
+    def execute_command_on_results(self, command, **args):
+
+        rooms = self.application.rooms
+
+        game_name = self.context.get("game_name")
+        page = self.context.get("page", 1)
+
+        filters = {
+            "game_name": game_name,
+            "page": page
+        }
+
+        filters.update(args)
+
+        filter_results = yield self.get(**filters)
+
+        failed_count = 0
+        deleted_count = 0
+
+        for room, game_server, region, host in filter_results["rooms"]:
+
+            try:
+                yield rooms.execute_stdin_command(self.gamespace, room.room_id, command, room=room, host=host)
+            except RoomError:
+                failed_count += 1
+                logging.exception("Failed to execute on a room {0}".format(room.room_id))
+            else:
+                deleted_count += 1
+
+        if failed_count:
+            raise a.ActionError("Failed to execute a command on {0} rooms".format(failed_count))
+
+        raise a.Redirect("rooms",
+                         message="Successfully executed command on a {0} rooms".format(deleted_count),
+                         **filters)
+
     def render(self, data):
 
         game_name = self.context.get("game_name")
@@ -2118,12 +2402,13 @@ class RoomsController(a.AdminController):
                 "players": str(room.players) + " / " + str(room.max_players),
                 "region": [a.link("region", region.name, icon="globe", region_id=region.region_id)],
                 "host": [a.link("host", host.name, icon="server", host_id=host.host_id)],
+                "debug": [a.link("debug_host", "", icon="bug", host_id=host.host_id, room_id=room.room_id)],
                 "settings": [a.json_view(room.room_settings)],
             }
             for room, game_server, region, host in data["rooms"]
         ]
 
-        return [
+        result = [
             a.breadcrumbs([
                 a.link("app", data["game_title"], record_id=game_name)
             ], "Rooms"),
@@ -2155,6 +2440,9 @@ class RoomsController(a.AdminController):
                 }, {
                     "id": "host",
                     "title": "Host"
+                }, {
+                    "id": "debug",
+                    "title": "Debug"
                 }], rooms, "default", empty="No rooms to display"),
             a.pages(data["pages_count"]),
             a.form("Filters", fields={
@@ -2169,12 +2457,30 @@ class RoomsController(a.AdminController):
                 "game_settings": a.field("Game Custom Settings",
                                          "json", "primary", order=6, height=120),
             }, methods={
-                "filter": a.method("Filter", "primary")
-            }, data=data, icon="filter"),
-            a.links("Navigate", [
-                a.link("app", "Go back", icon="chevron-left", record_id=game_name)
-            ])
+                "filter": a.method("Filter rooms", "primary")
+            }, data=data, icon="filter")
         ]
+
+        if len(data["rooms"]):
+            result.append(a.split([
+                a.form("Execute console command to a matched rooms", fields={
+                    "command": a.field("Console command", "text", "primary",
+                                       description="A console command will be delivered to the running rooms "
+                                                   "(game servers) trough standard input")
+                }, methods={
+                    "execute_command_on_results": a.method("Execute command", "primary")
+                }, data=data, icon="code"),
+                a.form("Other actions", fields={}, methods={
+                    "delete_results": a.method("Delete matched rooms", "danger")
+                }, data=data, icon="bars")
+            ]))
+
+        result.append(a.links("Navigate", [
+            a.link("app", "Go back", icon="chevron-left", record_id=game_name),
+            a.link("spawn_room", "Spawn a new server", icon="flash", game_name=game_name),
+        ]))
+
+        return result
 
     def access_scopes(self):
         return ["game_admin"]

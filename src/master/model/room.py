@@ -361,13 +361,14 @@ class RoomsModel(Model):
             raise Return(result)
 
     @coroutine
-    def __insert_player__(self, gamespace, account_id, room_id, host_id, key, access_token, db, trigger_remove=True):
+    def __insert_player__(self, gamespace, account_id, room_id, host_id,
+                          key, access_token, info, db, trigger_remove=True):
         record_id = yield db.insert(
             """
             INSERT INTO `players`
-            (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`)
-            VALUES (%s, %s, %s, %s, %s, %s);
-            """, gamespace, account_id, room_id, host_id, key, access_token
+            (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`, `info`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s);
+            """, gamespace, account_id, room_id, host_id, key, access_token, ujson.dumps(info)
         )
 
         if trigger_remove:
@@ -428,7 +429,7 @@ class RoomsModel(Model):
             try:
                 select = yield db.get(
                     """
-                    SELECT `access_token`, `record_id`
+                    SELECT `access_token`, `info`, `record_id`
                     FROM `players`
                     WHERE `gamespace_id`=%s AND `room_id`=%s AND `key`=%s
                     LIMIT 1
@@ -443,6 +444,7 @@ class RoomsModel(Model):
 
                 record_id = select["record_id"]
                 access_token = select["access_token"]
+                info = select["info"]
 
                 try:
                     yield db.execute(
@@ -456,7 +458,7 @@ class RoomsModel(Model):
                 except common.database.DatabaseError as e:
                     raise RoomError("Failed to approve a join: " + e.args[1])
 
-                raise Return(access_token)
+                raise Return((access_token, info))
             finally:
                 yield db.commit()
 
@@ -496,7 +498,7 @@ class RoomsModel(Model):
     @coroutine
     def create_and_join_room(
             self, gamespace, game_name, game_version, gs, room_settings,
-            account_id, access_token, host, deployment_id, trigger_remove=True):
+            account_id, access_token, player_info, host, deployment_id, trigger_remove=True):
 
         max_players = gs.max_players
 
@@ -514,7 +516,7 @@ class RoomsModel(Model):
             )
 
             record_id = yield self.__insert_player__(
-                gamespace, account_id, room_id, host.host_id, key, access_token, self.db, trigger_remove)
+                gamespace, account_id, room_id, host.host_id, key, access_token, player_info, self.db, trigger_remove)
 
         except common.database.DatabaseError as e:
             raise RoomError("Failed to create a room: " + e.args[1])
@@ -522,9 +524,30 @@ class RoomsModel(Model):
             raise Return((record_id, key, room_id))
 
     @coroutine
+    def create_room(self, gamespace, game_name, game_version, gs, room_settings, host, deployment_id, max_players=0):
+
+        max_players = max_players or gs.max_players
+
+        try:
+            room_id = yield self.db.insert(
+                """
+                INSERT INTO `rooms`
+                (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
+                  `max_players`, `location`, `settings`, `state`, `host_id`, `region_id`, `deployment_id`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE', %s, %s, %s)
+                """, gamespace, game_name, game_version, gs.game_server_id, 0, max_players,
+                "{}", ujson.dumps(room_settings), host.host_id, host.region, deployment_id
+            )
+
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to create a room: " + e.args[1])
+        else:
+            raise Return(room_id)
+
+    @coroutine
     def create_and_join_room_multi(
             self, gamespace, game_name, game_version, gs, room_settings,
-            tokens, host, deployment_id, trigger_remove=True):
+            members, host, deployment_id, trigger_remove=True):
 
         max_players = gs.max_players
 
@@ -537,7 +560,7 @@ class RoomsModel(Model):
                     (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
                       `max_players`, `location`, `settings`, `state`, `host_id`, `region_id`, `deployment_id`)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'NONE', %s, %s, %s)
-                    """, gamespace, game_name, game_version, gs.game_server_id, len(tokens), max_players,
+                    """, gamespace, game_name, game_version, gs.game_server_id, len(members), max_players,
                     "{}", ujson.dumps(room_settings), host.host_id, host.region, deployment_id
                 )
 
@@ -545,15 +568,15 @@ class RoomsModel(Model):
                 scheme = []
                 keys = {}
 
-                for token in tokens:
+                for token, info in members:
                     key = RoomsModel.__generate_key__(gamespace, token.account)
                     keys[token.account] = key
-                    data.extend([gamespace, token.account, room_id, host.host_id, key, token.key])
-                    scheme.append('(%s, %s, %s, %s, %s, %s)')
+                    data.extend([gamespace, token.account, room_id, host.host_id, key, token.key, ujson.dumps(info)])
+                    scheme.append('(%s, %s, %s, %s, %s, %s, %s, %s)')
 
                 query_string = """
                     INSERT INTO `players`
-                    (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`)
+                    (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`, `info`)
                     VALUES {0};
                     """.format(",".join(scheme))
 
@@ -563,11 +586,11 @@ class RoomsModel(Model):
 
                 result = {
                     token.account: (record_id, keys[token.account])
-                    for record_id, token in enumerate(tokens, first_record_id)
+                    for record_id, (token, info) in enumerate(members, first_record_id)
                 }
 
                 if trigger_remove:
-                    accounts = [token.account for token in tokens]
+                    accounts = [token.account for token, info in members]
                     self.trigger_remove_temp_reservation_multi(gamespace, room_id, accounts)
 
         except common.database.DatabaseError as e:
@@ -578,7 +601,7 @@ class RoomsModel(Model):
     @coroutine
     def find_and_join_room_multi(
             self, gamespace, game_name, game_version, game_server_id,
-            tokens, settings, regions_order=None, region=None):
+            members, filters, regions_order=None, region=None):
 
         """
         Find the room and join into it, if any
@@ -586,15 +609,17 @@ class RoomsModel(Model):
         :param game_name: the game ID (string)
         :param game_version: the game's version (string, like 1.0)
         :param game_server_id: game server configuration id
-        :param tokens: active tokens of the players
-        :param settings: room specific filters, defined like so:
+        :param members: a list of pairs (token, info)
+                            token - a token of the player to join to a room
+                            info - custom information about the player to be passed to the game server once it joins
+        :param filters: room specific filters, defined like so:
                 {"filterA": 5, "filterB": true, "filterC": {"@func": ">", "@value": 10}}
         :param regions_order: a list of region id's to order result around
         :param region: an id of the region the search should be locked around
         :returns a pair records (see __join_room_multi__) and room info
         """
         try:
-            conditions = common.database.format_conditions_json('settings', settings)
+            conditions = common.database.format_conditions_json('settings', filters)
         except common.database.ConditionError as e:
             raise RoomError(e.message)
 
@@ -606,7 +631,7 @@ class RoomsModel(Model):
                 query.add_conditions(conditions)
                 query.regions_order = regions_order
                 query.for_update = True
-                query.free_slots = len(tokens)
+                query.free_slots = len(members)
                 query.show_full = False
 
                 if region:
@@ -624,7 +649,7 @@ class RoomsModel(Model):
 
                 # at last, join into the player list
                 records = yield self.__join_room_multi__(
-                    gamespace, room_id, room.host_id, tokens, db)
+                    gamespace, room_id, room.host_id, members, db)
 
                 raise Return((records, room))
 
@@ -633,7 +658,7 @@ class RoomsModel(Model):
 
     @coroutine
     def find_and_join_room(self, gamespace, game_name, game_version, game_server_id,
-                           account_id, access_token, settings,
+                           account_id, access_token, player_info, settings,
                            regions_order=None, region=None):
 
         """
@@ -644,6 +669,7 @@ class RoomsModel(Model):
         :param game_server_id: game server configuration id
         :param account_id: account of the player
         :param access_token: active player's access token
+        :param player_info: A custom information about the player to be passed to the game server once it joins
         :param settings: room specific filters, defined like so:
                 {"filterA": 5, "filterB": true, "filterC": {"@func": ">", "@value": 10}}
         :param regions_order: a list of region id's to order result around
@@ -680,14 +706,14 @@ class RoomsModel(Model):
 
                 # at last, join into the player list
                 record_id, key = yield self.__join_room__(
-                    gamespace, room_id, room.host_id, account_id, access_token, db)
+                    gamespace, room_id, room.host_id, account_id, access_token, player_info, db)
                 raise Return((record_id, key, room))
 
         except common.database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
 
     @coroutine
-    def join_room(self, gamespace, game_name, room_id, account_id, access_token):
+    def join_room(self, gamespace, game_name, room_id, account_id, access_token, player_info):
 
         """
         Find the room and join into it, if any
@@ -696,6 +722,7 @@ class RoomsModel(Model):
         :param room_id: an ID of the room join to
         :param account_id: account of the player
         :param access_token: active player's access token
+        :param player_info: A custom information about the player to be passed to the game server once it joins
         :returns a pair of record_id, a key (an unique string to find the record by) for the player and room info
         """
 
@@ -718,7 +745,7 @@ class RoomsModel(Model):
 
                 # at last, join into the player list
                 record_id, key = yield self.__join_room__(
-                    gamespace, room_id, room.host_id, account_id, access_token, db)
+                    gamespace, room_id, room.host_id, account_id, access_token, player_info, db)
 
                 raise Return((record_id, key, room))
 
@@ -907,13 +934,15 @@ class RoomsModel(Model):
         raise Return(result)
 
     @coroutine
-    def __join_room_multi__(self, gamespace, room_id, host_id, tokens, db):
+    def __join_room_multi__(self, gamespace, room_id, host_id, members, db):
         """
         Joins a bulk of players to the room. A slot for each token is guaranteed
 
         :param gamespace: the gamespace
         :param room_id: a room to join to
-        :param tokens: tokens of the players to join to a room
+        :param members: a list of pairs (token, info)
+                            token - a token of the player to join to a room
+                            info - custom information about the player to be passed to the game server once it joins
         :param db: a reference to database instance
 
         :returns a dict of pairs of record id and a key {1: (record_id, key), 2: (record_id, key), ...},
@@ -922,23 +951,23 @@ class RoomsModel(Model):
 
         try:
             # increment player count (virtually)
-            yield self.__inc_players_num__(gamespace, room_id, db, len(tokens))
+            yield self.__inc_players_num__(gamespace, room_id, db, len(members))
             yield db.commit()
 
             data = []
             scheme = []
             keys = {}
 
-            for token in tokens:
+            for token, info in members:
                 key = RoomsModel.__generate_key__(gamespace, token.account)
                 keys[token.account] = key
-                data.extend([gamespace, token.account, room_id, host_id, key, token.key])
-                scheme.append('(%s, %s, %s, %s, %s, %s)')
+                data.extend([gamespace, token.account, room_id, host_id, key, token.key, ujson.dumps(info)])
+                scheme.append('(%s, %s, %s, %s, %s, %s, %s)')
 
             first_record_id = yield db.insert(
                 """
                 INSERT INTO `players`
-                (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`)
+                (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`, `info`)
                 VALUES {0};
                 """.format(",".join(scheme)), *data
             )
@@ -946,10 +975,10 @@ class RoomsModel(Model):
 
             result = {
                 token.account: (record_id, keys[token.account])
-                for record_id, token in enumerate(tokens, first_record_id)
+                for record_id, (token, info) in enumerate(members, first_record_id)
             }
 
-            accounts = [token.account for token in tokens]
+            accounts = [token.account for token, info in members]
             self.trigger_remove_temp_reservation_multi(gamespace, room_id, accounts)
 
             yield db.commit()
@@ -960,13 +989,14 @@ class RoomsModel(Model):
         raise Return(result)
 
     @coroutine
-    def __join_room__(self, gamespace, room_id, host_id, account_id, access_token, db):
+    def __join_room__(self, gamespace, room_id, host_id, account_id, access_token, player_info, db):
         """
         Joins the player to the room
         :param gamespace: the gamespace
         :param room_id: a room to join to
         :param account_id: account of the player
         :param access_token: active player's access token
+        :param player_info: A custom information about the player to be passed to the game server once it joins
         :param db: a reference to database instance
 
         :returns a pair of record id and a key (an unique string to find the record by)
@@ -980,7 +1010,7 @@ class RoomsModel(Model):
             yield db.commit()
 
             record_id = yield self.__insert_player__(
-                gamespace, account_id, room_id, host_id, key, access_token, db, True)
+                gamespace, account_id, room_id, host_id, key, access_token, player_info, db, True)
             yield db.commit()
 
             yield db.commit()
@@ -1084,32 +1114,62 @@ class RoomsModel(Model):
         raise Return(rooms)
 
     @coroutine
-    def terminate_room(self, gamespace, room_id):
+    def terminate_room(self, gamespace, room_id, room=None, host=None):
 
-        room = yield self.get_room(gamespace, room_id)
+        if not room:
+            room = yield self.get_room(gamespace, room_id)
+
+        if not host:
+            try:
+                host = yield self.hosts.get_host(room.host_id)
+            except HostNotFound:
+                raise RoomError("Failed to get host, not found: " + room.host_id)
+
+        server_host = host.internal_location
 
         try:
-            host = yield self.hosts.get_host(room.host_id)
-        except HostNotFound:
-            logging.error("Failed to get host, not found: " + room.host_id)
-        else:
-            server_host = host.internal_location
+            yield self.internal.post(
+                server_host, "terminate",
+                {
+                    "room_id": room_id,
+                    "gamespace": gamespace
+                }, discover_service=False, timeout=10)
 
-            try:
-                yield self.internal.post(
-                    server_host, "terminate",
-                    {
-                        "room_id": room_id,
-                        "gamespace": gamespace
-                    }, discover_service=False, timeout=10)
-
-            except InternalError as e:
-                if e.code == 599:
-                    pass
-
+        except InternalError as e:
+            if e.code == 599:
+                pass
+            elif e.code == 404:
+                pass
+            else:
                 raise RoomError("Failed to terminate a room: " + str(e.code) + " " + e.body)
 
         yield self.remove_room(gamespace, room_id)
+
+    @coroutine
+    def execute_stdin_command(self, gamespace, room_id, command, room=None, host=None):
+
+        if not room:
+            room = yield self.get_room(gamespace, room_id)
+
+        if not host:
+            try:
+                host = yield self.hosts.get_host(room.host_id)
+            except HostNotFound:
+                raise RoomError("Failed to get host, not found: " + room.host_id)
+
+        server_host = host.internal_location
+
+        try:
+            yield self.internal.post(
+                server_host, "execute_stdin",
+                {
+                    "room_id": room_id,
+                    "command": command,
+                    "gamespace": gamespace
+                }, discover_service=False, timeout=10)
+
+        except InternalError as e:
+            raise RoomError("Failed to execute a command: " + str(e.code) + " " + e.body)
 
     @coroutine
     def remove_host_rooms(self, host_id, except_rooms=None):

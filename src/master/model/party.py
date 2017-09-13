@@ -14,7 +14,7 @@ from common import Enum, Flags
 from gameserver import GameServerNotFound, GameVersionNotFound
 from deploy import NoCurrentDeployment
 from host import HostNotFound
-from room import RoomError
+from room import RoomError, RoomNotFound
 
 import ujson
 import logging
@@ -56,6 +56,7 @@ class PartyAdapter(object):
         self.region_id = data.get("region_id")
         self.settings = data.get("party_settings")
         self.room_settings = data.get("room_settings")
+        self.room_filters = data.get("room_filters")
         self.close_callback = data.get("party_close_callback")
         self.flags = PartyFlags(data.get("party_flags", "").lower().split(","))
         self.status = PartyStatus(data.get("party_status", PartyStatus.CREATED))
@@ -162,6 +163,56 @@ class PartySession(object):
 
     @coroutine
     @validate(room_settings="json_dict")
+    def __join_server__(self, members, party):
+
+        members = [
+            (AccessToken(member.token), {
+                "party:id": str(party.id),
+                "party:profile": member.profile,
+                "party:role": member.role
+            })
+            for member in members
+        ]
+
+        records, room = yield self.parties.rooms.find_and_join_room_multi(
+            self.gamespace_id, self.party.game_name, self.party.game_version,
+            self.party.game_server_id, members, self.party.room_filters, region=self.party.region_id)
+
+        self.room_id = room.room_id
+
+        logging.info("Found a room: '{0}'".format(self.room_id))
+
+        location = room.location
+        settings = room.room_settings
+
+        yield [self.send_message(
+            PartySession.MESSAGE_TYPE_GAME_STARTED, {
+                "id": str(self.room_id),
+                "slot": str(record_id),
+                "key": str(key),
+                "location": location,
+                "settings": settings
+            }, account_id=account)
+            for account, (record_id, key) in records.iteritems()
+            if str(account) != self.account_id]
+
+        my_record = records.get(str(self.account_id))
+
+        if not my_record:
+            raise PartyError(500, "No player's record found")
+
+        my_record_id, my_key = my_record
+
+        yield self.__process_message__(PartySession.MESSAGE_TYPE_GAME_STARTED, {
+            "id": str(self.room_id),
+            "slot": str(my_record_id),
+            "key": str(my_key),
+            "location": location,
+            "settings": settings
+        })
+
+    @coroutine
+    @validate(room_settings="json_dict")
     def __spawn_server__(self, members, party):
 
         room_settings = {
@@ -209,11 +260,18 @@ class PartySession(object):
             if server_settings is None:
                 raise PartyError(500, "No default version configuration")
 
-        tokens = [AccessToken(member.token) for member in members]
+        create_members = [
+            (AccessToken(member.token), {
+                "party:id": str(party.id),
+                "party:profile": member.profile,
+                "party:role": member.role
+            })
+            for member in members
+        ]
 
         records, self.room_id = yield self.parties.rooms.create_and_join_room_multi(
             self.gamespace_id, self.party.game_name, self.party.game_version,
-            gs, room_settings, tokens, host, deployment_id, trigger_remove=False)
+            gs, room_settings, create_members, host, deployment_id, trigger_remove=False)
 
         logging.info("Created a room: '{0}'".format(self.room_id))
 
@@ -460,7 +518,15 @@ class PartySession(object):
                 parties = self.parties
 
                 try:
-                    yield self.__spawn_server__(members, party)
+                    if party.room_filters:
+                        # if filters is defined, that means we need to find a matching server first
+                        try:
+                            yield self.__join_server__(members, party)
+                        except RoomNotFound:
+                            # and if there's no matching rooms, create one
+                            yield self.__spawn_server__(members, party)
+                    else:
+                        yield self.__spawn_server__(members, party)
                 except PartyError as e:
 
                     # rollback
@@ -793,12 +859,12 @@ class PartyModel(Model):
 
     @coroutine
     @validate(gamespace_id="int", game_name="str_name", game_version="str_name", game_server_name="str_name",
-              region_id="int", party_settings="json_dict", room_settings="json_dict", max_members="int",
-              account_id="int", member_role="json_dict", member_token="str", auto_join="bool",
+              region_id="int", party_settings="json_dict", room_settings="json_dict", room_filters="json_dict",
+              max_members="int", account_id="int", member_role="json_dict", member_token="str", auto_join="bool",
               party_flags=PartyFlags, close_callback="str_name")
     def create_party(self, gamespace_id, game_name, game_version, game_server_name, region_id, party_settings,
                      room_settings, max_members, account_id, member_profile, member_token, party_flags,
-                     auto_join=True, close_callback=None):
+                     room_filters=None, auto_join=True, close_callback=None):
 
         if max_members < 2:
             raise PartyError(400, "'max_members' cannot be lass than 2")
@@ -816,12 +882,13 @@ class PartyModel(Model):
                     """
                     INSERT INTO `parties` 
                     (`gamespace_id`, `party_num_members`, `party_max_members`, `game_name`, `game_version`, 
-                     `game_server_id`, `region_id`, `party_settings`, `room_settings`, `party_status`, 
+                     `game_server_id`, `region_id`, `party_settings`, `room_settings`, `room_filters`, `party_status`, 
                      `party_flags`, `party_close_callback`) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                     """, gamespace_id, members_count, max_members, game_name, game_version,
                     gs.game_server_id, region_id, ujson.dumps(party_settings), ujson.dumps(room_settings),
-                    PartyStatus.CREATED, party_flags.dump(), close_callback)
+                    ujson.dumps(room_filters) if room_filters else None, PartyStatus.CREATED, party_flags.dump(),
+                    close_callback)
             except DatabaseError as e:
                 raise PartyError(500, "Failed to create new party: " + e.args[1])
 
@@ -838,6 +905,7 @@ class PartyModel(Model):
                 "game_server_id": gs.game_server_id,
                 "party_settings": party_settings,
                 "room_settings": room_settings,
+                "room_filters": room_filters,
                 "region_id": region_id
             })
 
@@ -1072,11 +1140,12 @@ class PartyModel(Model):
               region_id="int", party_filter="json_dict", account_id="int",
               member_profile="json_dict", member_token="str",
               auto_create="bool", create_party_settings="json_dict", create_room_settings="json_dict",
-              create_max_members="int", create_flags=PartyFlags, create_close_callback="str_name")
+              create_room_filters="json_dict", create_max_members="int", create_flags=PartyFlags,
+              create_close_callback="str_name")
     def join_party(self, gamespace_id, game_name, game_version, game_server_name, region_id,
                    party_filter, account_id, member_profile, member_token,
                    auto_create, create_party_settings, create_room_settings,
-                   create_max_members, create_flags, create_close_callback=None):
+                   create_max_members, create_flags, create_room_filters=None, create_close_callback=None):
 
         if create_max_members < 2:
             raise PartyError(400, "'max_members' cannot be lass than 2")
@@ -1110,7 +1179,7 @@ class PartyModel(Model):
                             gamespace_id, game_name, game_version, game_server_name, region_id,
                             create_party_settings, create_room_settings, create_max_members, account_id,
                             member_profile, member_token, party_flags=create_flags, auto_join=True,
-                            close_callback=create_close_callback)
+                            close_callback=create_close_callback, room_filters=create_room_filters)
                         raise Return(result)
                     else:
                         raise NoSuchParty()

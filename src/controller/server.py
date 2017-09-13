@@ -43,6 +43,7 @@ class GameControllerServer(common.server.Server):
         return [
             (r"/spawn", h.SpawnHandler),
             (r"/terminate", h.TerminateHandler),
+            (r"/execute_stdin", h.ExecuteStdInHandler),
             (r"/heartbeat", h.HeartbeatHandler),
             (r"/@deliver_deployment", h.DeliverDeploymentHandler)
         ]

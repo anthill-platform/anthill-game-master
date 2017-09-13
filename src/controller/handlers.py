@@ -102,6 +102,22 @@ class TerminateHandler(AuthenticatedHandler):
         yield s.terminate()
 
 
+class ExecuteStdInHandler(AuthenticatedHandler):
+    @coroutine
+    @internal
+    def post(self):
+        room_id = self.get_argument("room_id")
+        command = self.get_argument("command")
+
+        gs = self.application.gs
+        s = gs.get_server_by_room(room_id)
+
+        if not s:
+            raise HTTPError(404, "No such server")
+
+        yield s.send_stdin(command)
+
+
 class HeartbeatHandler(AuthenticatedHandler):
     @internal
     def get(self):

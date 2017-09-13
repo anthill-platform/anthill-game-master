@@ -26,7 +26,7 @@ class ControllersClientModel(object):
     def joined(self, gamespace, room_id, key, extend_token=None, extend_scopes=None, **payload):
 
         try:
-            access_token = yield self.rooms.approve_join(gamespace, room_id, key)
+            access_token, info = yield self.rooms.approve_join(gamespace, room_id, key)
         except ApproveFailed:
             raise ControllerError("Failed to approve a join")
         else:
@@ -46,6 +46,7 @@ class ControllersClientModel(object):
             # if everything is ok, return the token
             raise Return({
                 "access_token": access_token,
+                "info": info,
                 "scopes": parsed.scopes if parsed.is_valid() else []
             })
 

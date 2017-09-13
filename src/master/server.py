@@ -71,6 +71,7 @@ class GameMasterServer(common.server.Server):
             "deployment": admin.ApplicationDeploymentController,
             "rooms": admin.RoomsController,
             "room": admin.RoomController,
+            "spawn_room": admin.SpawnRoomController,
 
             "game_server": admin.GameServerController,
             "new_game_server": admin.NewGameServerController,

@@ -32,6 +32,13 @@
 
             this.update_server(server);
             this.apply_filter(s);
+
+            if (this.auto_open == server.room_id)
+            {
+                this.auto_open = null;
+
+                this.select_server(server);
+            }
         },
         apply_filter: function (s)
         {
@@ -148,9 +155,15 @@
                 '<i class="fa fa-remove" aria-hidden="true"></i> Terminate</a>').appendTo(s.controls).
             click(function()
             {
-                zis.ws.rpc("kill", {
+                zis.ws.request("kill", {
                     "server": name,
                     "hard": false
+                }).done(function(payload)
+                {
+                    notify_success("Server has been terminated!")
+                }).fail(function(code, message, data)
+                {
+                    notify_error("Error " + code + ": " + message)
                 });
 
                 return false;
@@ -161,9 +174,15 @@
                 '<i class="fa fa-trash" aria-hidden="true"></i> ' +
                 'Kill</a>').appendTo(s.controls).click(function()
             {
-                zis.ws.rpc("kill", {
+                zis.ws.request("kill", {
                     "server": name,
                     "hard": true
+                }).done(function(payload)
+                {
+                    notify_success("Server has been killed!")
+                }).fail(function(code, message, data)
+                {
+                    notify_error("Error " + code + ": " + message)
                 });
 
                 return false;
@@ -420,6 +439,11 @@
             });
 
             this.status('Connecting...', 'refresh', 'info');
+
+            if (context["room"])
+            {
+                this.auto_open = context["room"];
+            }
 
             this.ws.onopen = function()
             {

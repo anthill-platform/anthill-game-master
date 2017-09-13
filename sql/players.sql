@@ -7,6 +7,7 @@ CREATE TABLE `players` (
   `state` enum('RESERVED','JOINED') NOT NULL DEFAULT 'RESERVED',
   `key` varchar(64) NOT NULL DEFAULT '',
   `access_token` mediumtext NOT NULL,
+  `info` json DEFAULT NULL,
   PRIMARY KEY (`record_id`),
   KEY `room_id` (`room_id`),
   KEY `key` (`key`),

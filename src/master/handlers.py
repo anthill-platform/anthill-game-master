@@ -69,8 +69,10 @@ class JoinHandler(AuthenticatedHandler):
         if ip is None:
             raise HTTPError(400, "Bad IP")
 
+        player_info = {}
+
         player = Player(self.application, gamespace, game_name, game_version,
-                        game_server_name, account, self.token.key, ip)
+                        game_server_name, account, self.token.key, player_info, ip)
 
         lock_my_region = self.get_argument("my_region_only", "false") == "true"
         selected_region = self.get_argument("region", None)
@@ -222,8 +224,10 @@ class CreateHandler(AuthenticatedHandler):
         if ip is None:
             raise HTTPError(400, "Bad IP")
 
+        player_info = {}
+
         player = Player(self.application, gamespace, game_name, game_version,
-                        game_server_name, account, self.token.key, ip)
+                        game_server_name, account, self.token.key, player_info, ip)
 
         try:
             yield player.init()
@@ -707,6 +711,11 @@ class CreatePartySessionHandler(PartyHandler):
         except (KeyError, ValueError):
             raise HTTPError(3400, "Corrupted room settings")
 
+        try:
+            room_filters = ujson.loads(self.get_argument("room_filters", "null"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted room settings")
+
         auto_join = self.get_argument("auto_join", "true") == "true"
 
         if auto_join:
@@ -757,7 +766,8 @@ class CreatePartySessionHandler(PartyHandler):
                 gamespace, game_name, game_version, game_server_name,
                 my_region.region_id, party_settings, room_settings, max_members,
                 account_id, member_profile, self.token.key,
-                party_flags=party_flags, auto_join=auto_join, close_callback=close_callback)
+                party_flags=party_flags, auto_join=auto_join, close_callback=close_callback,
+                room_filters=room_filters)
         except ValidationError as e:
             raise HTTPError(3400, e.message)
         except PartyError as e:
@@ -799,6 +809,11 @@ class PartiesSearchHandler(PartyHandler):
             room_settings = ujson.loads(self.get_argument("create_room_settings", "{}"))
         except (KeyError, ValueError):
             raise HTTPError(3400, "Corrupted room settings")
+
+        try:
+            room_filters = ujson.loads(self.get_argument("create_room_filters", "null"))
+        except (KeyError, ValueError):
+            raise HTTPError(3400, "Corrupted room filters")
 
         try:
             member_profile = ujson.loads(self.get_argument("member_profile", "{}"))
@@ -857,7 +872,8 @@ class PartiesSearchHandler(PartyHandler):
                 my_region.region_id, party_filter, account_id,
                 member_profile, self.token.key,
                 auto_create, party_settings, room_settings, max_members,
-                create_flags=create_party_flags, create_close_callback=close_callback)
+                create_flags=create_party_flags, create_close_callback=close_callback,
+                create_room_filters=room_filters)
         except ValidationError as e:
             raise HTTPError(3400, e.message)
         except PartyError as e:

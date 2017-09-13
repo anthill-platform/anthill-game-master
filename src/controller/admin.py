@@ -75,7 +75,8 @@ class DebugController(a.StreamAdminController):
             "room_settings": server.room.room_settings(),
             "version": server.game_version,
             "deployment": server.deployment,
-            "name": server.name
+            "name": server.name,
+            "room_id": server.room.id()
         }
 
     @coroutine

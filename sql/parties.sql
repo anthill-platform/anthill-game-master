@@ -9,6 +9,7 @@ CREATE TABLE `parties` (
   `region_id` int(10) NOT NULL,
   `party_settings` json NOT NULL,
   `room_settings` json NOT NULL,
+  `room_filters` json DEFAULT NULL,
   `party_status` enum('CREATED','STARTING','STARTED') NOT NULL DEFAULT 'CREATED',
   `party_close_callback` varchar(64) DEFAULT NULL,
   `party_flags` set('AUTO_START','AUTO_CLOSE') NOT NULL DEFAULT '',
