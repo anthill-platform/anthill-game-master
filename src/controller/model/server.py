@@ -181,6 +181,7 @@ class GameServer(object):
         env = {
             "server:settings": ujson.dumps(server_settings, escape_forward_slashes=False),
             "room:settings": ujson.dumps(room_settings),
+            "room:id": str(room.id()),
             "game:max_players": str(max_players)
         }
 
