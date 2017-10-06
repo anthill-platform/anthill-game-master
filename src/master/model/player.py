@@ -514,10 +514,15 @@ class PlayersGroup(object):
                 regions = yield self.hosts.list_closest_regions(p_long, p_lat)
                 regions_order = [region.region_id for region in regions]
 
+        join_members = [
+            (token, {})
+            for token in self.tokens
+        ]
+
         try:
             records, self.room = yield self.rooms.find_and_join_room_multi(
                 self.gamespace, self.game_name, self.game_version, self.gs.game_server_id,
-                self.tokens, search_settings,
+                join_members, search_settings,
 
                 regions_order=regions_order,
                 region=my_region_only.region_id if my_region_only else None)
