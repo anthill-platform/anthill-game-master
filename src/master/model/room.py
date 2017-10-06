@@ -572,7 +572,7 @@ class RoomsModel(Model):
                     key = RoomsModel.__generate_key__(gamespace, token.account)
                     keys[token.account] = key
                     data.extend([gamespace, token.account, room_id, host.host_id, key, token.key, ujson.dumps(info)])
-                    scheme.append('(%s, %s, %s, %s, %s, %s, %s, %s)')
+                    scheme.append('(%s, %s, %s, %s, %s, %s, %s)')
 
                 query_string = """
                     INSERT INTO `players`
@@ -635,7 +635,7 @@ class RoomsModel(Model):
                 query.show_full = False
 
                 if region:
-                    query.region_id = region.region_id
+                    query.region_id = region
 
                 query.host_active = True
 

@@ -115,6 +115,7 @@ class PartySession(object):
         self.released = False
         self.is_joined = False
         self.send_new_player = False
+        self.need_auto_start = False
         self.members = []
         self.token = token
 
@@ -147,10 +148,10 @@ class PartySession(object):
         self.send_new_player = send_new_player
         self.is_joined = True
 
-    @coroutine
-    def __check_auto_start__(self, message):
-        if (PartyFlags.AUTO_START in self.party.flags) and (self.party.party_max_members == self.party.party_num_members):
-            yield self.__start_game__(message, check_permissions=False)
+    def __check_auto_start__(self):
+        if (PartyFlags.AUTO_START in self.party.flags) and \
+                (self.party.party_max_members == self.party.party_num_members):
+            self.need_auto_start = True
 
     def dump(self):
         return {
@@ -365,6 +366,9 @@ class PartySession(object):
     @coroutine
     @validate()
     def leave_party(self):
+        if self.released:
+            raise PartyError(410, "Party is released")
+
         if not self.is_joined:
             raise PartyError(410, "Not joined")
 
@@ -464,7 +468,7 @@ class PartySession(object):
                 "account": self.account_id,
                 "profile": self.member_profile})
 
-            yield self.__check_auto_start__({"auto_start": True})
+            yield self.__check_auto_start__()
 
     @coroutine
     @validate(message_payload="json_dict")
@@ -518,15 +522,18 @@ class PartySession(object):
                 parties = self.parties
 
                 try:
-                    if party.room_filters:
+                    if party.room_filters is None:
+                        logging.info("Party spawning new server: {0}".format(party.id))
+                        yield self.__spawn_server__(members, party)
+                    else:
                         # if filters is defined, that means we need to find a matching server first
                         try:
+                            logging.info("Party joining to a server: {0}".format(party.id))
                             yield self.__join_server__(members, party)
                         except RoomNotFound:
+                            logging.info("No rooms found, spawning new server: {0}".format(party.id))
                             # and if there's no matching rooms, create one
                             yield self.__spawn_server__(members, party)
-                    else:
-                        yield self.__spawn_server__(members, party)
                 except PartyError as e:
 
                     # rollback
@@ -597,15 +604,20 @@ class PartySession(object):
             self.members = yield self.parties.list_party_members(self.gamespace_id, self.party.id)
 
         if self.is_joined:
-            yield self.__check_auto_start__({
-                "auto_start": True
-            })
+            yield self.__check_auto_start__()
         else:
             for member in members:
                 if str(member.account) == str(self.account_id):
                     self.role = member.role
                     self.joined(member.profile)
                     break
+
+    @coroutine
+    def start_game_if_needed(self):
+        if self.need_auto_start:
+            yield self.__start_game__({
+                "auto_start": True
+            }, check_permissions=False)
 
     @staticmethod
     def drop_message(gamespace_id, party_id, broker, message_type, payload, routing_key):
@@ -864,7 +876,7 @@ class PartyModel(Model):
               party_flags=PartyFlags, close_callback="str_name")
     def create_party(self, gamespace_id, game_name, game_version, game_server_name, region_id, party_settings,
                      room_settings, max_members, account_id, member_profile, member_token, party_flags,
-                     room_filters=None, auto_join=True, close_callback=None):
+                     room_filters=None, auto_join=True, close_callback=None, session_callback=None):
 
         if max_members < 2:
             raise PartyError(400, "'max_members' cannot be lass than 2")
@@ -887,7 +899,7 @@ class PartyModel(Model):
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                     """, gamespace_id, members_count, max_members, game_name, game_version,
                     gs.game_server_id, region_id, ujson.dumps(party_settings), ujson.dumps(room_settings),
-                    ujson.dumps(room_filters) if room_filters else None, PartyStatus.CREATED, party_flags.dump(),
+                    ujson.dumps(room_filters) if room_filters is not None else None, PartyStatus.CREATED, party_flags.dump(),
                     close_callback)
             except DatabaseError as e:
                 raise PartyError(500, "Failed to create new party: " + e.args[1])
@@ -950,6 +962,12 @@ class PartyModel(Model):
                 }))
 
             yield session.init(members=members)
+
+            if session_callback:
+                yield session_callback(session)
+
+            yield session.start_game_if_needed()
+
             raise Return(session)
 
     @coroutine
@@ -1145,7 +1163,8 @@ class PartyModel(Model):
     def join_party(self, gamespace_id, game_name, game_version, game_server_name, region_id,
                    party_filter, account_id, member_profile, member_token,
                    auto_create, create_party_settings, create_room_settings,
-                   create_max_members, create_flags, create_room_filters=None, create_close_callback=None):
+                   create_max_members, create_flags, create_room_filters=None,
+                   create_close_callback=None, session_callback=None):
 
         if create_max_members < 2:
             raise PartyError(400, "'max_members' cannot be lass than 2")
@@ -1234,6 +1253,11 @@ class PartyModel(Model):
                 session.joined(member_profile, send_new_player=True)
 
                 yield session.init()
+
+                if session_callback:
+                    yield session_callback(session)
+
+                yield session.start_game_if_needed()
                 raise Return(session)
 
             finally:
@@ -1243,7 +1267,8 @@ class PartyModel(Model):
     @validate(gamespace_id="int", party_id="int", account_id="int", member_profile="json_dict", member_token="str",
               check_members="json_dict", auto_join="bool")
     def party_session(self, gamespace_id, party_id, account_id, member_token,
-                      member_profile=None, check_members=None, auto_join=True):
+                      member_profile=None, check_members=None, auto_join=True,
+                      session_callback=None):
 
         with (yield self.db.acquire(auto_commit=False)) as db:
             try:
@@ -1303,18 +1328,25 @@ class PartyModel(Model):
 
                     session.joined(member_profile, send_new_player=True)
 
-                try:
-                    yield db.execute(
-                        """
-                        UPDATE `parties`
-                        SET `party_num_members`=%s
-                        WHERE `gamespace_id`=%s AND `party_id`=%s
-                        LIMIT 1;
-                        """, party.party_num_members, gamespace_id, party_id)
-                except DatabaseError as e:
-                    raise PartyError(500, "Failed to register a player into a party: " + e.args[1])
+                    try:
+                        yield db.execute(
+                            """
+                            UPDATE `parties`
+                            SET `party_num_members`=%s
+                            WHERE `gamespace_id`=%s AND `party_id`=%s
+                            LIMIT 1;
+                            """, party.party_num_members, gamespace_id, party_id)
+                    except DatabaseError as e:
+                        raise PartyError(500, "Failed to register a player into a party: " + e.args[1])
+
+                yield db.commit()
 
                 yield session.init(members=members)
+
+                if session_callback:
+                    yield session_callback(session)
+
+                yield session.start_game_if_needed()
                 raise Return(session)
 
             finally:

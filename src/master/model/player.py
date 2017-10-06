@@ -520,7 +520,7 @@ class PlayersGroup(object):
                 self.tokens, search_settings,
 
                 regions_order=regions_order,
-                region=my_region_only)
+                region=my_region_only.region_id if my_region_only else None)
 
         except RoomNotFound as e:
             if auto_create:

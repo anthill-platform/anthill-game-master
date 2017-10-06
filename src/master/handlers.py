@@ -515,7 +515,9 @@ class PartyHandler(JsonRPCWSHandler):
         self.close(code, reason)
 
     @coroutine
-    def _inited(self):
+    def _inited(self, session):
+        self.session = session
+
         self.session.set_on_message(self._on_message)
         self.session.set_on_close(self._on_close)
 
@@ -532,6 +534,8 @@ class PartyHandler(JsonRPCWSHandler):
 
     @coroutine
     def send_message(self, payload):
+        if not self.session:
+            return
 
         try:
             result = yield self.session.send_message(PartySession.MESSAGE_TYPE_CUSTOM, payload)
@@ -542,6 +546,8 @@ class PartyHandler(JsonRPCWSHandler):
 
     @coroutine
     def close_party(self, message):
+        if not self.session:
+            return
 
         try:
             result = yield self.session.close_party(message)
@@ -554,6 +560,8 @@ class PartyHandler(JsonRPCWSHandler):
 
     @coroutine
     def join_party(self, member_profile, check_members=None):
+        if not self.session:
+            return
 
         try:
             result = yield self.session.join_party(member_profile, check_members=check_members)
@@ -566,6 +574,8 @@ class PartyHandler(JsonRPCWSHandler):
 
     @coroutine
     def leave_party(self):
+        if not self.session:
+            return
 
         try:
             result = yield self.session.leave_party()
@@ -578,6 +588,8 @@ class PartyHandler(JsonRPCWSHandler):
 
     @coroutine
     def start_game(self, message):
+        if not self.session:
+            return
 
         try:
             result = yield self.session.start_game(message)
@@ -762,20 +774,18 @@ class CreatePartySessionHandler(PartyHandler):
                 raise HTTPError(3410, "No default region defined")
 
         try:
-            self.session = yield parties.create_party(
+            yield parties.create_party(
                 gamespace, game_name, game_version, game_server_name,
                 my_region.region_id, party_settings, room_settings, max_members,
                 account_id, member_profile, self.token.key,
                 party_flags=party_flags, auto_join=auto_join, close_callback=close_callback,
-                room_filters=room_filters)
+                room_filters=room_filters, session_callback=self._inited)
         except ValidationError as e:
             raise HTTPError(3400, e.message)
         except PartyError as e:
             raise HTTPError(3000 + e.code, e.message)
         except NoSuchParty:
             raise HTTPError(3404, "No such party")
-        else:
-            yield self._inited()
 
 
 class PartiesSearchHandler(PartyHandler):
@@ -867,21 +877,20 @@ class PartiesSearchHandler(PartyHandler):
                 raise HTTPError(3410, "No default region defined")
 
         try:
-            self.session = yield parties.join_party(
+            yield parties.join_party(
                 gamespace, game_name, game_version, game_server_name,
                 my_region.region_id, party_filter, account_id,
                 member_profile, self.token.key,
                 auto_create, party_settings, room_settings, max_members,
                 create_flags=create_party_flags, create_close_callback=close_callback,
-                create_room_filters=room_filters)
+                create_room_filters=room_filters, session_callback=self._inited)
         except ValidationError as e:
             raise HTTPError(3400, e.message)
         except PartyError as e:
             raise HTTPError(3000 + e.code, e.message)
         except NoSuchParty:
             raise HTTPError(3404, "No such party")
-        else:
-            yield self._inited()
+
 
     @coroutine
     def on_closed(self):
@@ -927,17 +936,16 @@ class PartySessionHandler(PartyHandler):
         account_id = self.token.account
 
         try:
-            self.session = yield parties.party_session(
+            yield parties.party_session(
                 gamespace, party_id, account_id, self.token.key,
-                member_profile=member_profile, check_members=check_members, auto_join=auto_join)
+                member_profile=member_profile, check_members=check_members,
+                auto_join=auto_join, session_callback=self._inited)
         except ValidationError as e:
             raise HTTPError(3400, e.message)
         except PartyError as e:
             raise HTTPError(3000 + e.code, e.message)
         except NoSuchParty:
             raise HTTPError(3404, "No such party")
-        else:
-            yield self._inited()
 
     @coroutine
     def on_closed(self):
