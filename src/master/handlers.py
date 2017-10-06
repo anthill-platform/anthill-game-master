@@ -783,6 +783,7 @@ class CreatePartySessionHandler(PartyHandler):
         except ValidationError as e:
             raise HTTPError(3400, e.message)
         except PartyError as e:
+            logging.exception("Failed to open party session")
             raise HTTPError(3000 + e.code, e.message)
         except NoSuchParty:
             raise HTTPError(3404, "No such party")
@@ -887,6 +888,7 @@ class PartiesSearchHandler(PartyHandler):
         except ValidationError as e:
             raise HTTPError(3400, e.message)
         except PartyError as e:
+            logging.exception("Failed to open party session")
             raise HTTPError(3000 + e.code, e.message)
         except NoSuchParty:
             raise HTTPError(3404, "No such party")
@@ -943,6 +945,7 @@ class PartySessionHandler(PartyHandler):
         except ValidationError as e:
             raise HTTPError(3400, e.message)
         except PartyError as e:
+            logging.exception("Failed to open party session")
             raise HTTPError(3000 + e.code, e.message)
         except NoSuchParty:
             raise HTTPError(3404, "No such party")
