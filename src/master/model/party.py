@@ -468,7 +468,7 @@ class PartySession(object):
                 "account": self.account_id,
                 "profile": self.member_profile})
 
-            yield self.__check_auto_start__()
+            self.__check_auto_start__()
 
     @coroutine
     @validate(message_payload="json_dict")
@@ -604,7 +604,7 @@ class PartySession(object):
             self.members = yield self.parties.list_party_members(self.gamespace_id, self.party.id)
 
         if self.is_joined:
-            yield self.__check_auto_start__()
+            self.__check_auto_start__()
         else:
             for member in members:
                 if str(member.account) == str(self.account_id):
