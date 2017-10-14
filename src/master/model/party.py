@@ -1,4 +1,4 @@
-from tornado.gen import coroutine, Return
+from tornado.gen import coroutine, Return, IOLoop
 
 from common.validate import validate
 from common.model import Model
@@ -469,6 +469,7 @@ class PartySession(object):
                 "profile": self.member_profile})
 
             self.__check_auto_start__()
+            IOLoop.current().add_callback(self.start_game_if_needed)
 
     @coroutine
     @validate(message_payload="json_dict")
