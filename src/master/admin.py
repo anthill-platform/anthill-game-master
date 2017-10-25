@@ -38,7 +38,7 @@ class ApplicationController(a.AdminController):
         gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, record_id)
+            app = yield env_service.get_app_info(record_id)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -96,7 +96,7 @@ class GameServerController(a.AdminController):
         gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -163,7 +163,7 @@ class GameServerController(a.AdminController):
         gameservers = self.application.gameservers
 
         try:
-            yield env_service.get_app_info(self.gamespace, game_name)
+            yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -193,7 +193,7 @@ class GameServerController(a.AdminController):
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield env_service.get_app_info(self.gamespace, game_name)
+            yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -224,7 +224,7 @@ class NewGameServerController(a.AdminController):
         gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -293,7 +293,7 @@ class NewGameServerController(a.AdminController):
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield env_service.get_app_info(self.gamespace, game_name)
+            yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -351,7 +351,7 @@ class GameServerVersionController(a.AdminController):
         gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -539,7 +539,7 @@ class ApplicationVersionController(a.AdminController):
         deployments = self.application.deployments
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, app_id)
+            app = yield env_service.get_app_info(app_id)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -845,7 +845,7 @@ class ApplicationDeploymentController(a.AdminController):
         hosts = self.application.hosts
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -963,7 +963,7 @@ class ApplicationDeploymentController(a.AdminController):
         deployment_id = self.context.get("deployment_id")
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -1005,7 +1005,7 @@ class DeployApplicationController(a.UploadAdminController):
         env_service = self.application.env_service
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -1033,7 +1033,7 @@ class DeployApplicationController(a.UploadAdminController):
         env_service = self.application.env_service
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
         else:
@@ -1286,7 +1286,7 @@ class RootAdminController(a.AdminController):
     def get(self):
 
         env_service = self.application.env_service
-        apps = yield env_service.list_apps(self.gamespace)
+        apps = yield env_service.list_apps()
 
         hosts = self.application.hosts
 
@@ -1881,7 +1881,7 @@ class SpawnRoomController(a.AdminController):
         hosts = self.application.hosts
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -1934,7 +1934,7 @@ class SpawnRoomController(a.AdminController):
         game_name = self.context.get("game_name")
 
         try:
-            yield env_service.get_app_info(self.gamespace, game_name)
+            yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -2047,7 +2047,7 @@ class RoomController(a.AdminController):
             raise a.ActionError(e.message)
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, room.game_name)
+            app = yield env_service.get_app_info(room.game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -2166,7 +2166,7 @@ class RoomsController(a.AdminController):
         hosts = self.application.hosts
 
         try:
-            app = yield env_service.get_app_info(self.gamespace, game_name)
+            app = yield env_service.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
