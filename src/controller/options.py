@@ -14,7 +14,7 @@ define("gs_host",
        type=str)
 
 define("listen",
-       default="unix:/usr/local/var/run/anthill/dev_game_ctl.sock",
+       default="port:9509",
        help="Public hostname of this service for games (without protocol)",
        type=str)
 
