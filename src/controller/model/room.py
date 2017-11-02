@@ -2,7 +2,9 @@
 from tornado.gen import coroutine, Return
 
 import logging
+
 from common.internal import Internal, InternalError
+from common import retry
 
 
 class NotifyError(Exception):
@@ -34,13 +36,17 @@ class Room(object):
         Notify the master server about actions, happened in the room
         """
         try:
-            result = yield self.internal.request(
-                "game", "controller_action",
-                room_id=self.id(),
-                action=method,
-                gamespace=self.gamespace,
-                args=args,
-                kwargs=kwargs)
+            @retry(operation="notify room {0} action {1}".format(self.id(), method), max=5, delay=10)
+            def do_try(room_id, gamespace):
+                return self.internal.request(
+                    "game", "controller_action",
+                    room_id=room_id,
+                    action=method,
+                    gamespace=gamespace,
+                    args=args,
+                    kwargs=kwargs)
+
+            result = yield do_try(self.id(), self.gamespace)
 
         except InternalError as e:
             logging.error("Failed to notify an action: " + str(e.code) + ": " + e.body)

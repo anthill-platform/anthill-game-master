@@ -24,6 +24,7 @@ from common import retry, SyncTimeout
 from room import NotifyError
 
 import ujson
+import psutil
 
 
 class BufferedLog(object):
@@ -357,7 +358,7 @@ class GameServer(object):
             # totally may happen
             self.__recv_stop__()
         else:
-            if poll:
+            if poll is not None:
                 self.__recv_stop__()
 
     def __recv_stop__(self):
