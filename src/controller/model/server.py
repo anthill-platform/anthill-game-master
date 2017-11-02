@@ -352,8 +352,7 @@ class GameServer(object):
 
         # noinspection PyBroadException
         try:
-            with SyncTimeout(5):
-                poll = self.pipe.wait(os.WNOHANG)
+            poll = self.pipe.wait(os.WNOHANG)
         except:
             # totally may happen
             self.__recv_stop__()
