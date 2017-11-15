@@ -102,7 +102,7 @@ define("rate_create_room",
 # Deployments
 
 define("deployments_location",
-       default="/opt/local/deployments",
+       default="/opt/local/anthill/game-deployments",
        help="A limit for room creation for user tuple: (amount, time)",
        type=str)
 

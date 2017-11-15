@@ -9,6 +9,8 @@ from common.options import options
 from common.validate import validate
 from common.environment import AppNotFound
 
+import os
+
 
 class DeploymentError(Exception):
     def __init__(self, message):
@@ -80,6 +82,9 @@ class DeploymentModel(Model):
     def __init__(self, db):
         self.db = db
         self.deployments_location = options.deployments_location
+
+        if not os.path.isdir(self.deployments_location):
+            os.mkdir(self.deployments_location)
 
     def get_setup_db(self):
         return self.db

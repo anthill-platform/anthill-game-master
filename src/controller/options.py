@@ -31,7 +31,7 @@ define("sock_path",
        type=str)
 
 define("binaries_path",
-       default="/opt/local/gs",
+       default="/opt/local/anthill/game-binaries",
        help="Location of game server binaries.",
        type=str)
 

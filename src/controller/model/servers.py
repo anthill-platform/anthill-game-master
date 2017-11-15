@@ -26,6 +26,9 @@ class GameServersModel(Model):
         self.sock_path = sock_path
         self.binaries_path = binaries_path
 
+        if not os.path.isdir(self.binaries_path):
+            os.mkdir(self.binaries_path)
+
         self.pool = PortsPool(ports_pool_from, ports_pool_to)
         self.servers = {}
         self.servers_rooms = {}
