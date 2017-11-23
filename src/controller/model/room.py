@@ -82,12 +82,12 @@ class Room(object):
         self.notify_handlers[name] = callback
 
     def init_handlers(self):
-        self.add_handler("update_settings", self.__update_settings__)
+        self.add_handler("update_settings", self.update_settings)
 
     # special notify handlers
 
     @coroutine
-    def __update_settings__(self, settings, *args, **kwargs):
+    def update_settings(self, settings, *args, **kwargs):
         if settings:
             self.room_settings().update(settings)
 

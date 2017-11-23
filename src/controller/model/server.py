@@ -160,7 +160,7 @@ class GameServer(object):
 
         self.__handle__("check_deployment", self.__check_deployment__)
 
-        yield self.room.update_settings({}, settings)
+        yield self.room.update_settings(settings)
 
         self.__notify__(u"Inited.")
         self.set_status(GameServer.STATUS_RUNNING)
