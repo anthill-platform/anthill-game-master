@@ -398,6 +398,9 @@ class GameServer(object):
         if self.msg:
             yield self.msg.release()
 
+        if self.room:
+            yield self.room.release()
+
         # put back the ports acquired at spawn
         if self.ports:
             for port in self.ports:

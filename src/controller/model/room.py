@@ -22,6 +22,10 @@ class Room(object):
         self.room_id = room_id
         self.internal = Internal()
 
+        # special handles to support on special notify events
+        self.notify_handlers = {}
+        self.init_handlers()
+
         logging.info("New room created: " + str(room_id))
 
     def game_settings(self):
@@ -35,6 +39,16 @@ class Room(object):
         """
         Notify the master server about actions, happened in the room
         """
+
+        notify_handler = self.notify_handlers.get(method, None)
+
+        # if there's a handler with such action name, call it first
+        if notify_handler:
+            result = yield notify_handler(*args, **kwargs)
+            # and if it has some result, return it instead
+            if result is not None:
+                raise Return(result)
+
         try:
             @retry(operation="notify room {0} action {1}".format(self.id(), method), max=5, delay=10)
             def do_try(room_id, gamespace):
@@ -53,29 +67,34 @@ class Room(object):
 
             raise NotifyError(e.code, e.message)
         else:
-            # if there's a method with such action name, call it
-            if (not method.startswith("_")) and hasattr(self, method):
-                yield getattr(self, method)(result, *args, **kwargs)
-
             raise Return(result)
-
-    @coroutine
-    def update_settings(self, result, settings, *args, **kwargs):
-        if settings:
-            self.room_settings().update(settings)
 
     def room_settings(self):
         return self.settings["room"]
-
-    @coroutine
-    def stopped(self, result, *args, **kwargs):
-        self.rooms.delete(self.room_id)
 
     def server_settings(self):
         return self.settings["server"]
 
     def other_settings(self):
         return self.settings.get("other", None)
+
+    def add_handler(self, name, callback):
+        self.notify_handlers[name] = callback
+
+    def init_handlers(self):
+        self.add_handler("update_settings", self.__update_settings__)
+
+    # special notify handlers
+
+    @coroutine
+    def __update_settings__(self, settings, *args, **kwargs):
+        if settings:
+            self.room_settings().update(settings)
+
+    @coroutine
+    def release(self):
+        # called when the room is being destroyed
+        self.rooms.delete(self.room_id)
 
 
 class RoomSlot(object):
