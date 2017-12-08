@@ -1,4 +1,5 @@
 # Game Service
+
 When it comes to hosting a server for a multiplayer game, major problems appear:
 
 1. Game servers actually need to be put somewhere;
@@ -9,6 +10,10 @@ When it comes to hosting a server for a multiplayer game, major problems appear:
 5. Binary files of the game server need to be deployed to all host machines (the more machines are, harder it is).
 
 This service solves them all, the rest is completely up to the game.
+
+<b>Note</b>: Game Service covers one part of the matchmaking services only.
+See <a href="https://github.com/anthill-platform/anthill-game-controller#game-controller">Controller Service</a> for
+another part.
 
 ## API
 
@@ -24,7 +29,8 @@ Players to a healthy one if some Host dies.
 
 * **Controller Service**. Controller Service is a second part of Game Service. It runs on a 
 certain Host and spawns Game Server instance on it when requested by Master Service. Also it heartbeats health status 
-of each Game Server running on Host and stops it if it stops responding or crashes.
+of each Game Server running on Host and stops it if it stops responding or crashes. 
+<a href="https://github.com/anthill-platform/anthill-game-controller#game-controller">See Controller Service documentation.</a>
 
 * **Room**. Room represents a single game instance the player may join. Each room has a limit
 of maximum players on it and may contain custom setting to search upon.
