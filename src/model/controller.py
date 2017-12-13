@@ -46,6 +46,7 @@ class ControllersClientModel(object):
             # if everything is ok, return the token
             raise Return({
                 "access_token": access_token,
+                "account": parsed.account if parsed.is_valid() else None,
                 "info": info,
                 "scopes": parsed.scopes if parsed.is_valid() else []
             })
