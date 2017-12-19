@@ -5,6 +5,6 @@ CREATE TABLE `deployments` (
   `game_version` varchar(64) NOT NULL DEFAULT '',
   `deployment_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `deployment_hash` varchar(256) NOT NULL DEFAULT '',
-  `deployment_status` enum('delivering','uploading','uploaded','delivered','error') NOT NULL DEFAULT 'uploading',
+  `deployment_status` enum('delivering','uploading','uploaded','delivered','error','deleting','deleted') NOT NULL DEFAULT 'uploading',
   PRIMARY KEY (`deployment_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=32 DEFAULT CHARSET=utf8;

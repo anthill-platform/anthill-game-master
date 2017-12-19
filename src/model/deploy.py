@@ -1,5 +1,8 @@
 
 from tornado.gen import coroutine, Return
+from tornado.concurrent import run_on_executor
+from concurrent.futures import ThreadPoolExecutor
+
 import common.database
 
 
@@ -7,7 +10,6 @@ from common import clamp
 from common.model import Model
 from common.options import options
 from common.validate import validate
-from common.environment import AppNotFound
 
 import os
 
@@ -44,6 +46,8 @@ class DeploymentDeliveryAdapter(object):
 
     STATUS_DELIVERING = "delivering"
     STATUS_DELIVERED = "delivered"
+    STATUS_DELETING = "deleting"
+    STATUS_DELETED = "deleted"
     STATUS_ERROR = "error"
 
     def __init__(self, data):
@@ -59,6 +63,8 @@ class DeploymentAdapter(object):
     STATUS_UPLOADED = "uploaded"
     STATUS_DELIVERING = "delivering"
     STATUS_DELIVERED = "delivered"
+    STATUS_DELETING = "deleting"
+    STATUS_DELETED = "deleted"
     STATUS_ERROR = "error"
 
     def __init__(self, data):
@@ -79,6 +85,8 @@ class CurrentDeploymentAdapter(object):
 
 
 class DeploymentModel(Model):
+    executor = ThreadPoolExecutor(max_workers=4)
+
     def __init__(self, db):
         self.db = db
         self.deployments_location = options.deployments_location
@@ -254,16 +262,31 @@ class DeploymentModel(Model):
 
         raise Return(map(DeploymentAdapter, deployments))
 
-    @coroutine
-    @validate(gamespace_id="int", deployment_id="int")
-    def delete_deployment(self, gamespace_id, deployment_id):
+    @run_on_executor
+    def __remove_deployment_file__(self, filename):
+        os.remove(filename)
 
+    @coroutine
+    @validate(gamespace_id="int", deployment=DeploymentAdapter)
+    def delete_deployment_file(self, gamespace_id, deployment):
+
+        deployment_path = os.path.join(
+            self.deployments_location,
+            deployment.game_name,
+            deployment.game_version,
+            str(deployment.deployment_id) + ".zip")
+
+        yield self.__remove_deployment_file__(deployment_path)
+
+    @coroutine
+    @validate(gamespace_id="int", deployment=DeploymentAdapter)
+    def delete_deployment(self, gamespace_id, deployment):
         try:
             yield self.db.execute(
                 """
                 DELETE FROM `deployments`
                 WHERE `gamespace_id`=%s AND `deployment_id`=%s
-                """, gamespace_id, deployment_id
+                """, gamespace_id, deployment.deployment_id
             )
         except common.database.DatabaseError as e:
             raise DeploymentError("Failed to delete a deployment: " + e.args[1])

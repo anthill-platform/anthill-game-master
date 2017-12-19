@@ -486,6 +486,52 @@ class ApplicationVersionController(a.AdminController):
                          version_id=game_version)
 
     @coroutine
+    def delete_deployment(self, **ignored):
+        game_name = self.context.get("game_name")
+        game_version = self.context.get("game_version")
+        deployment_id = self.context.get("deployment_id")
+
+        deployments = self.application.deployments
+        hosts = self.application.hosts
+
+        try:
+            deployment = yield deployments.get_deployment(self.gamespace, deployment_id)
+        except DeploymentNotFound:
+            raise a.ActionError("No such deployment")
+        else:
+            if (deployment.game_name != game_name) or (deployment.game_version != game_version):
+                raise a.ActionError("Wrong deployment")
+
+        if deployment.status in [DeploymentAdapter.STATUS_DELETED, DeploymentAdapter.STATUS_DELETING,
+                                 DeploymentAdapter.STATUS_DELIVERING, DeploymentAdapter.STATUS_UPLOADING]:
+            raise a.ActionError("Cannot delete already deleted deployment or one in progress")
+
+        try:
+            hosts_list = yield hosts.list_enabled_hosts()
+        except HostError as e:
+            raise a.ActionError("Failed to list hosts: " + e.message)
+
+        deliver_list = []
+        try:
+            deliveries = yield deployments.list_deployment_deliveries(self.gamespace, deployment_id)
+        except DeploymentDeliveryError as e:
+            raise a.ActionError("Failed to list deliveries: " + e.message)
+        else:
+            host_ids = {item.host_id: item for item in hosts_list}
+            for delivery in deliveries:
+                deliver_list.append((delivery.delivery_id, host_ids[delivery.host_id]))
+
+        delivery = Delivery(self.application, self.gamespace)
+        IOLoop.current().add_callback(delivery.__clean__, deployment, deliver_list=deliver_list)
+
+        raise a.Redirect(
+            "app_version",
+            message="Deployment deleting process been started",
+            app_id=game_name,
+            version_id=game_version
+        )
+
+    @coroutine
     def version_disable(self, **ignored):
         deployments = self.application.deployments
 
@@ -619,6 +665,19 @@ class ApplicationVersionController(a.AdminController):
                        game_version=self.context.get("version_id"))
             ]))
 
+        def get_buttons(item):
+            if item.status not in (DeploymentAdapter.STATUS_DELETING, DeploymentAdapter.STATUS_DELETED):
+                return [a.button("app_version", "Set Current", "primary", _method="switch_deployment",
+                                 game_name=self.context.get("app_id"),
+                                 game_version=self.context.get("version_id"),
+                                 deployment_id=item.deployment_id),
+                        a.button("app_version", "Delete", "danger", _method="delete_deployment",
+                                 game_name=self.context.get("app_id"),
+                                 game_version=self.context.get("version_id"),
+                                 deployment_id=item.deployment_id)]\
+                    if (current_deployment != item.deployment_id) else "Current deployment"
+            return []
+
         r.extend([
             a.content("Deployments", headers=[
                 {
@@ -650,15 +709,13 @@ class ApplicationVersionController(a.AdminController):
                             DeploymentAdapter.STATUS_DELIVERING: a.status("Delivering", "info", "refresh fa-spin"),
                             DeploymentAdapter.STATUS_UPLOADED: a.status("Uploaded", "success", "check"),
                             DeploymentAdapter.STATUS_DELIVERED: a.status("Delivered", "success", "check"),
-                            DeploymentAdapter.STATUS_ERROR: a.status("Error", "danger", "exclamation-triangle")
+                            DeploymentAdapter.STATUS_ERROR: a.status("Error", "danger", "exclamation-triangle"),
+                            DeploymentAdapter.STATUS_DELETING: a.status("Deleting", "info", "refresh fa-spin"),
+                            DeploymentAdapter.STATUS_DELETED: a.status("Deleted", "default", "times"),
                         }.get(item.status, a.status(item.status, "default", "refresh"))
                     ],
-                    "actions": [
-                        a.button("app_version", "Set Current", "primary", _method="switch_deployment",
-                                 game_name=self.context.get("app_id"),
-                                 game_version=self.context.get("version_id"),
-                                 deployment_id=item.deployment_id)
-                    ] if (current_deployment != item.deployment_id) else "Current deployment"
+
+                    "actions": get_buttons(item)
                 }
                 for item in data["deployments"]
             ], style="primary", empty="There is no deployments"),
@@ -720,12 +777,13 @@ class Delivery(object):
                     yield write(data)
 
             request = tornado.httpclient.HTTPRequest(
-                url=host.internal_location + "/@deliver_deployment?" + urllib.urlencode({
-                    "game_name": game_name,
-                    "game_version": game_version,
-                    "deployment_id": deployment_id,
-                    "deployment_hash": deployment_hash
-                }),
+                url=host.internal_location + "/game/{0}/{1}/deployments/{2}/deliver?{3}".format(
+                    game_name,
+                    game_version,
+                    deployment_id,
+                    urllib.urlencode({
+                        "deployment_hash": deployment_hash
+                    })),
                 method="PUT",
                 request_timeout=2400,
                 body_producer=producer
@@ -773,6 +831,32 @@ class Delivery(object):
             raise Return(True)
 
     @coroutine
+    def __deliver_clean_host__(self, game_name, game_version, deployment_id, delivery_id, host):
+        client = tornado.httpclient.AsyncHTTPClient()
+        deployments = self.application.deployments
+
+        yield deployments.update_deployment_delivery_status(
+            self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELETING)
+
+        try:
+            request = tornado.httpclient.HTTPRequest(
+                url=host.internal_location + "/game/{0}/{1}/deployments/{2}".format(
+                    game_name,
+                    game_version,
+                    deployment_id),
+                method="DELETE",
+                request_timeout=2400
+            )
+            yield client.fetch(request)
+        except Exception as e:
+            yield deployments.update_deployment_delivery_status(
+                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR, str(e))
+            raise DeploymentDeliveryError(str(e))
+
+        yield deployments.update_deployment_delivery_status(
+            self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELETED)
+
+    @coroutine
     def __deliver__(self, game_name, game_version, deployment_id, deployment_hash, wait_for_deliver=False):
         hosts = self.application.hosts
         deployments = self.application.deployments
@@ -788,14 +872,8 @@ class Delivery(object):
             raise a.ActionError("Failed to list deliveries: " + e.message)
 
         deliver_list = []
-        delivery_ids = {
-            item.host_id: item
-            for item in deliveries
-        }
-        host_ids = {
-            item.host_id: item
-            for item in hosts_list
-        }
+        delivery_ids = {item.host_id: item for item in deliveries}
+        host_ids = {item.host_id: item for item in hosts_list}
 
         for host in hosts_list:
             if host.host_id not in delivery_ids:
@@ -835,6 +913,43 @@ class Delivery(object):
             IOLoop.current().spawn_callback(
                 self.__deliver_upload__, game_name, game_version, deployment_id, deliver_list, deployment_hash)
 
+    @coroutine
+    def __clean__(self, deployment, deliver_list=None):
+        deployments = self.application.deployments
+
+        try:
+            yield deployments.update_deployment_status(
+                self.gamespace, deployment.deployment_id, DeploymentAdapter.STATUS_DELETING)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to update deployment status: " + e.message)
+
+        tasks = [
+            self.__deliver_clean_host__(deployment.game_name, deployment.game_version,
+                                        deployment.deployment_id, delivery_id, host)
+            for delivery_id, host in deliver_list
+        ]
+
+        try:
+            yield tasks
+        except Exception as e:
+            logging.exception("Failed to delete deployment {0}".format(deployment.deployment_id))
+            yield deployments.update_deployment_status(
+                self.gamespace, deployment.deployment_id, DeploymentAdapter.STATUS_ERROR)
+            raise a.ActionError("Failed to delete deployment: " + e.message)
+
+        try:
+            yield deployments.delete_deployment_file(self.gamespace, deployment)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to remove deployment: " + e.message)
+        except DeploymentNotFound:
+            raise a.ActionError("No such deployment")
+
+        try:
+            yield deployments.update_deployment_status(
+                self.gamespace, deployment.deployment_id, DeploymentAdapter.STATUS_DELETED)
+        except DeploymentError as e:
+            raise a.ActionError("Failed to update deployment status: " + e.message)
+
 
 class ApplicationDeploymentController(a.AdminController):
     @coroutine
@@ -869,7 +984,8 @@ class ApplicationDeploymentController(a.AdminController):
 
         result = {
             "app_name": app["title"],
-            "deployment_status": deployment.status,
+            "deployment_status_value": deployment.status,
+            "deployment_status": deployment.status.title(),
             "deliveries": deliveries,
             "hosts": {
                 item.host_id: item
@@ -894,13 +1010,17 @@ class ApplicationDeploymentController(a.AdminController):
                     DeploymentAdapter.STATUS_UPLOADED: "success",
                     DeploymentAdapter.STATUS_DELIVERED: "success",
                     DeploymentAdapter.STATUS_ERROR: "danger",
-                }.get(data["deployment_status"], "info"), icon={
+                    DeploymentAdapter.STATUS_DELETING: "info",
+                    DeploymentAdapter.STATUS_DELETED: "default",
+                }.get(data["deployment_status_value"], "info"), icon={
                     DeploymentAdapter.STATUS_UPLOADING: "refresh fa-spin",
                     DeploymentAdapter.STATUS_DELIVERING: "refresh fa-spin",
                     DeploymentAdapter.STATUS_UPLOADED: "check",
                     DeploymentAdapter.STATUS_DELIVERED: "check",
                     DeploymentAdapter.STATUS_ERROR: "exclamation-triangle",
-                }.get(data["deployment_status"], "refresh fa-spin"))
+                    DeploymentAdapter.STATUS_DELETING: "refresh fa-spin",
+                    DeploymentAdapter.STATUS_DELETED: "times",
+                }.get(data["deployment_status_value"], "refresh fa-spin"))
             }, methods={
                 "deliver": a.method("Deliver again", "primary")
             } if data["deployment_status"] not in [
@@ -931,10 +1051,14 @@ class ApplicationDeploymentController(a.AdminController):
                                   {
                                       DeploymentDeliveryAdapter.STATUS_DELIVERING:
                                           a.status("Delivering", "info", "refresh fa-spin"),
-                                      DeploymentDeliveryAdapter.STATUS_DELIVERED: a.status("Delivered", "success",
-                                                                                           "check"),
-                                      DeploymentDeliveryAdapter.STATUS_ERROR: a.status("Error: " + item.error_reason,
-                                                                                       "danger", "exclamation-triangle")
+                                      DeploymentDeliveryAdapter.STATUS_DELIVERED:
+                                          a.status("Delivered", "success", "check"),
+                                      DeploymentDeliveryAdapter.STATUS_DELETING:
+                                          a.status("Deleting", "info", "refresh fa-spin"),
+                                      DeploymentDeliveryAdapter.STATUS_DELETED:
+                                          a.status("Deleted", "default", "times"),
+                                      DeploymentDeliveryAdapter.STATUS_ERROR:
+                                          a.status("Error: " + item.error_reason, "danger", "exclamation-triangle")
                                   }.get(item.status, a.status(item.status, "default", "refresh")),
                               ]
                           }
@@ -1064,6 +1188,10 @@ class DeployApplicationController(a.UploadAdminController):
         self.deployment_file = open(self.deployment_path, "w")
         self.sha256 = hashlib.sha256()
 
+    @run_on_executor
+    def test_zip(self, the_zip_file):
+        return the_zip_file.testzip()
+
     @coroutine
     def receive_completed(self):
 
@@ -1074,7 +1202,7 @@ class DeployApplicationController(a.UploadAdminController):
         the_zip_file = zipfile.ZipFile(self.deployment_path)
 
         try:
-            ret = the_zip_file.testzip()
+            ret = yield self.test_zip(the_zip_file)
         except Exception as e:
             try:
                 yield deployments.update_deployment_status(self.gamespace, self.deployment, "corrupt")
