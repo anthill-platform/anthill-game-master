@@ -1,9 +1,10 @@
 import ujson
 import logging
+import platform
 
 from common.model import Model
 from tornado.gen import coroutine, Return, sleep
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import common.database
 import common.discover
@@ -78,6 +79,17 @@ class RoomAdapter(object):
             "game_version": self.game_version,
             "max_players": self.max_players
         }
+
+
+class HostsPlayersCountAdapter(object):
+    def __init__(self, data):
+        self.players_count = int(data.get("players_count", 0))
+        self.host_id = str(data.get("host_id"))
+        self.host_name = str(data.get("host_name"))
+        self.host_region = str(data.get("host_region"))
+        self.host_load = data.get("host_load")
+        self.host_memory = data.get("host_memory")
+        self.host_cpu = data.get("host_cpu")
 
 
 class RoomQuery(object):
@@ -280,10 +292,51 @@ class RoomsModel(Model):
     def get_setup_triggers(self):
         return ["player_removal"]
 
-    def __init__(self, db, hosts):
+    def __init__(self, app, db, hosts):
         self.db = db
         self.internal = Internal()
         self.hosts = hosts
+        self.app = app
+
+        if app.monitoring:
+            logging.info("[room] Players count monitoring enabled.")
+            self.monitoring_report_callback = PeriodicCallback(self.__update_monitoring_status__, 30000)
+        else:
+            self.monitoring_report_callback = None
+
+    @coroutine
+    def __update_monitoring_status__(self):
+        players_count = yield self.get_players_count()
+        players_count_per_host = yield self.list_players_count_per_host()
+
+        self.app.monitor_action(
+            "players",
+            values={"count": players_count})
+
+        for host in players_count_per_host:
+            self.app.monitor_action(
+                "players_per_host",
+                values={
+                    "count": float(host.players_count),
+                    "load": host.host_load,
+                    "memory": host.host_memory,
+                    "cpu": host.host_cpu,
+                },
+                host_name=host.host_name,
+                host_id=host.host_id)
+
+    @coroutine
+    def started(self):
+        yield super(RoomsModel, self).started()
+        if self.monitoring_report_callback:
+            self.monitoring_report_callback.start()
+            yield self.__update_monitoring_status__()
+
+    @coroutine
+    def stopped(self):
+        if self.monitoring_report_callback:
+            self.monitoring_report_callback.stop()
+        yield super(RoomsModel, self).stopped()
 
     @coroutine
     def get_players_count(self):
@@ -298,6 +351,22 @@ class RoomsModel(Model):
             raise RoomError("Failed to get players count: " + e.args[1])
 
         raise Return(count["count"])
+
+    @coroutine
+    def list_players_count_per_host(self):
+        try:
+            counts = yield self.db.query(
+                """
+                SELECT COUNT(`players`.`account_id`) AS `players_count`, `hosts`.*
+                FROM `players`, `hosts`
+                WHERE `players`.`host_id` = `hosts`.`host_id` AND `players`.`state`='JOINED'
+                GROUP BY `players`.`host_id`;
+                """
+            )
+        except common.database.DatabaseError as e:
+            raise RoomError("Failed to get players count: " + e.args[1])
+
+        raise Return(map(HostsPlayersCountAdapter, counts))
 
     @coroutine
     def list_player_records(self, gamespace, account_id):

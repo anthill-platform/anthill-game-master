@@ -63,6 +63,9 @@ class HeartbeatModel(Model):
             logging.warning("Failed to heartbeat host {0}: {1}".format(
                 host.host_id, str(e)
             ))
+
+            self.app.monitor_rate("heartbeats", "failed")
+
             raise HeartbeatError()
         else:
             raise Return(HeartbeatReport(report))

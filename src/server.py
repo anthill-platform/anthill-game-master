@@ -45,7 +45,7 @@ class GameMasterServer(common.server.Server):
 
         self.gameservers = GameServersModel(self.db)
         self.hosts = HostsModel(self.db)
-        self.rooms = RoomsModel(self.db, self.hosts)
+        self.rooms = RoomsModel(self, self.db, self.hosts)
         self.deployments = DeploymentModel(self.db)
         self.bans = BansModel(self.db)
         self.heartbeat = HeartbeatModel(self, self.db)
