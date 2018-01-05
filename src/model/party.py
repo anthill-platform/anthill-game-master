@@ -563,7 +563,7 @@ class PartySession(object):
                     if party.close_callback:
                         try:
                             result = yield parties.__party_close_callback__(
-                                self.gamespace_id, party.close_callback,
+                                self.gamespace_id, party.game_name, party.game_version, party.close_callback,
                                 party=party.dump(), message=message_payload, reason="game_started")
                         except PartyError:
                             logging.exception("Failed to call close_callback: {0}".format(party.close_callback))
@@ -1063,7 +1063,7 @@ class PartyModel(Model):
                 if party.close_callback:
                     try:
                         result = yield self.__party_close_callback__(
-                            gamespace_id, party.close_callback,
+                            gamespace_id, party.game_name, party.game_version, party.close_callback,
                             party=party.dump(), message=message, reason=reason)
                     except PartyError:
                         logging.exception("Failed to call close_callback: {0}".format(party.close_callback))
@@ -1133,7 +1133,7 @@ class PartyModel(Model):
                         if party.close_callback:
                             try:
                                 result = yield self.__party_close_callback__(
-                                    gamespace_id, party.close_callback,
+                                    gamespace_id, party.game_name, party.game_version, party.close_callback,
                                     party=party.dump(), reason="leave")
                             except PartyError:
                                 logging.exception("Failed to call close_callback: {0}".format(party.close_callback))
@@ -1354,11 +1354,11 @@ class PartyModel(Model):
                 yield db.commit()
 
     @coroutine
-    def __party_close_callback__(self, gamespace_id, close_callback, **args):
+    def __party_close_callback__(self, gamespace_id, game_name, game_version, close_callback,  **args):
         try:
             result = yield self.internal.request(
                 "exec", "call_function",
-                function_name="game", method_name=close_callback,
+                application_name=game_name, application_version=game_version, method_name=close_callback,
                 gamespace=gamespace_id, args=args, env={})
         except InternalError as e:
             raise PartyError(e.code, str(e))
