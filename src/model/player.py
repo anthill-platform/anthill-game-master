@@ -8,7 +8,9 @@ from host import HostNotFound, RegionNotFound
 
 from gameserver import GameVersionNotFound
 from deploy import NoCurrentDeployment
+
 import logging
+import uuid
 
 from common import random_string
 from common.access import AccessToken
@@ -270,6 +272,7 @@ class PlayersGroup(object):
         self.bans = app.bans
         self.gamespace = gamespace
         self.ip = ip
+        self.group_id = str(uuid.uuid4())
 
         self.game_name = game_name
         self.game_version = game_version
@@ -435,7 +438,9 @@ class PlayersGroup(object):
             raise PlayerError(503, "Not enough hosts")
 
         create_members = [
-            (token, {})
+            (token, {
+                "multi:id": self.group_id
+            })
             for token in self.tokens
         ]
 
@@ -515,7 +520,9 @@ class PlayersGroup(object):
                 regions_order = [region.region_id for region in regions]
 
         join_members = [
-            (token, {})
+            (token, {
+                "multi:id": self.group_id
+            })
             for token in self.tokens
         ]
 
