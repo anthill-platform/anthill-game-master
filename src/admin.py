@@ -1441,7 +1441,7 @@ class RootAdminController(a.AdminController):
                 for region in data["regions"]
             ]),
             a.links("Bans", [
-                a.link("find_ban", "Find A Ban", icon="search"),
+                a.link("find_active_ban", "Find A Ban", icon="search"),
                 a.link("new_ban", "Issue A Ban", icon="plus"),
                 a.link("mass_ban", "Issue Multiple Bans", icon="plus-square"),
             ]),

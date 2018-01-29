@@ -427,6 +427,132 @@ error will be returned, with the explanation.
 | 404           | The game version is turned off or there is no such game version |
 | 410           | Current deployment is outdated |
 
+d like to have a few keys with same name, put a new one under different gamespace.
+
+# REST API Requests
+
+## Issue a ban
+
+Bans a certain account from participating in game service (joining servers, etc).
+
+Once issued, the player would not be able to join a server with certain account. 
+Upon first attempt of player's join, player's IP address would be also associated with that ban, so joining
+servers would not be possible from that IP from now on, regardless of the account in question.
+
+#### ← Request
+
+```rest
+POST /ban/issue
+```
+
+| Argument         | Description                                                                                    |
+|------------------|------------------------------------------------------------------------------------------------|
+| `account`        | Player's account in question                                                |
+| `reason`         | Human-readable description of the ban                                               |
+| `expires`        | When the ban expires, a date in `%Y-%m-%d %H:%M:%S` format.                                                   |
+
+Access scope `game_ban` is required for this request.
+
+#### → Response
+
+In case of success, a JSON object with ban id is returned:
+```
+{
+   "id": <ban id>
+}
+```
 
 
+| Response         | Description                                          |
+|------------------|------------------------------------------------------|
+| `200 OK`         | Everything went OK, ban information follows.        |
+| `400 Bad Arguments` | Some arguments are missing or wrong.        |
+| `406 Not Acceptable`  | This user have already been banned                                 |
 
+## Get ban information
+
+Returns existing ban's information by its ID.
+
+#### ← Request
+
+```rest
+GET /ban/<ban-id>
+```
+
+| Argument         | Description                                                                                    |
+|------------------|------------------------------------------------------------------------------------------------|
+| `ban-id`         | Ban ID in question                                                |
+
+Access scope `game_ban` is required for this request.
+
+#### → Response
+
+In case of success, a JSON object with ban information is returned:
+
+```json
+{
+    "id": "<ban-id>",
+    "reason": "<ban-reason>",
+    "expires": "<ban-expire-date>",
+    "account": "<account-id>",
+    "ip": "<account's-ip>"
+}
+```
+
+| Response         | Description                                          |
+|------------------|------------------------------------------------------|
+| `200 OK`         | Everything went OK, ban information follows.        |
+| `404 Not Found`  | Not such ban.        |
+| `400 Bad Arguments` | Some arguments are missing or wrong.        |
+
+## Updated ban information
+
+Updates existing ban by its ID.
+
+#### ← Request
+
+```rest
+POST /ban/<ban-id>
+```
+
+| Argument         | Description                                                                                    |
+|------------------|------------------------------------------------------------------------------------------------|
+| `ban-id`         | Ban ID in question                                                |
+| `reason`         | Human-readable description of the ban                                               |
+| `expires`        | When the ban expires, a date in `%Y-%m-%d %H:%M:%S` format.                                                   |
+
+Access scope `game_ban` is required for this request.
+
+#### → Response
+
+In case of success, nothing is returned.
+
+| Response         | Description                                          |
+|------------------|------------------------------------------------------|
+| `200 OK`         | Everything went OK, ban has been updated.        |
+| `400 Bad Arguments` | Some arguments are missing or wrong.        |
+
+## Invalidate a ban
+
+Invalidates existing ban by its ID.
+
+#### ← Request
+
+```rest
+DELETE /ban/<ban-id>
+```
+
+| Argument         | Description                                                                                    |
+|------------------|------------------------------------------------------------------------------------------------|
+| `ban-id`         | Ban ID in question                                                |
+
+Access scope `game_ban` is required for this request.
+
+#### → Response
+
+In case of success, nothing is returned.
+
+| Response         | Description                                          |
+|------------------|------------------------------------------------------|
+| `200 OK`         | Everything went OK, ban has been invalidated.        |
+| `400 Bad Arguments` | Some arguments are missing or wrong.        |

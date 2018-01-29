@@ -29,6 +29,15 @@ class BanAdapter(object):
         self.expires = data.get("ban_expires")
         self.reason = data.get("ban_reason")
 
+    def dump(self):
+        return {
+            "id": self.ban_id,
+            "account": str(self.account),
+            "ip": str(self.ip),
+            "expires": str(self.expires),
+            "reason": str(self.reason)
+        }
+
 
 class BansModel(Model):
     def __init__(self, db):
@@ -41,6 +50,7 @@ class BansModel(Model):
         return ["bans"]
 
     @coroutine
+    @validate(gamespace="int", account="int", expires="datetime", reason="str")
     def new_ban(self, gamespace, account, expires, reason):
 
         try:
@@ -59,6 +69,7 @@ class BansModel(Model):
             raise Return(ban_id)
 
     @coroutine
+    @validate(gamespace="int", ban_id="int", ban_expires="datetime", ban_reason="str")
     def update_ban(self, gamespace, ban_id, ban_expires, ban_reason):
         try:
             yield self.db.execute(
@@ -94,6 +105,25 @@ class BansModel(Model):
                 WHERE `ban_gamespace`=%s AND `ban_id`=%s
                 LIMIT 1;
                 """, gamespace, ban_id
+            )
+        except common.database.DatabaseError as e:
+            raise BanError("Failed to get server: " + e.args[1])
+
+        if ban is None:
+            raise NoSuchBan()
+
+        raise Return(BanAdapter(ban))
+
+    @coroutine
+    def get_active_ban_by_account(self, gamespace, account):
+        try:
+            ban = yield self.db.get(
+                """
+                SELECT *
+                FROM `bans`
+                WHERE `ban_gamespace`=%s AND `ban_account`=%s AND `ban_expires` > NOW()
+                LIMIT 1;
+                """, gamespace, account
             )
         except common.database.DatabaseError as e:
             raise BanError("Failed to get server: " + e.args[1])
@@ -143,7 +173,7 @@ class BansModel(Model):
 
     @coroutine
     def lookup_ban(self, gamespace, account, account_ip):
-        ban = yield self.find_ban(gamespace, account, account_ip)
+        ban = yield self.find_active_ban(gamespace, account, account_ip)
 
         if ban and (not ban.ip):
             yield self.update_ban_ip(gamespace, ban.ban_id, account_ip)
@@ -152,7 +182,7 @@ class BansModel(Model):
         raise Return(ban)
 
     @coroutine
-    def find_ban(self, gamespace, account, account_ip):
+    def find_active_ban(self, gamespace, account, account_ip):
         try:
             ban = yield self.db.get(
                 """
@@ -208,6 +238,7 @@ class BansModel(Model):
         raise Return(result)
 
     @coroutine
+    @validate(gamespace="int", ban_id="int")
     def delete_ban(self, gamespace, ban_id):
 
         try:

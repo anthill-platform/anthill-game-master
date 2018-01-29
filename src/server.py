@@ -87,7 +87,7 @@ class GameMasterServer(common.server.Server):
 
             "new_ban": admin.IssueBanController,
             "mass_ban": admin.IssueMultipleBansController,
-            "find_ban": admin.FindBanController,
+            "find_active_ban": admin.FindBanController,
             "ban": admin.BanController
         }
 
@@ -122,7 +122,10 @@ class GameMasterServer(common.server.Server):
             (r"/party/create/(.*)/(.*)/(.*)/session", h.CreatePartySessionHandler),
             (r"/party/create/(.*)/(.*)/(.*)", h.CreatePartySimpleHandler),
             (r"/party/(.*)/session", h.PartySessionHandler),
-            (r"/party/(.*)", h.SimplePartyHandler)
+            (r"/party/(.*)", h.SimplePartyHandler),
+            (r"/ban/issue", h.IssueBanHandler),
+            (r"/ban/find/(.*)", h.FindBanHandler),
+            (r"/ban/(.*)", h.BanHandler),
         ]
 
 

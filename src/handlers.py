@@ -14,6 +14,7 @@ from model.controller import ControllerError
 from model.player import Player, PlayersGroup, RoomNotFound, PlayerError, RoomError, PlayerBanned
 from model.gameserver import GameServerNotFound
 from model.party import PartySession, PartyError, NoSuchParty, PartyFlags
+from model.ban import UserAlreadyBanned, BanError, NoSuchBan
 
 import logging
 
@@ -48,6 +49,83 @@ class InternalHandler(object):
             raise InternalError(e.code, e.message)
 
         raise Return(result)
+
+    @coroutine
+    def issue_ban(self, gamespace, account, reason, expires):
+        bans = self.application.bans
+
+        try:
+            ban_id = yield bans.new_ban(gamespace, account, expires, reason)
+        except ValidationError as e:
+            raise InternalError(400, e.message)
+        except BanError as e:
+            raise InternalError(500, e.message)
+        except UserAlreadyBanned:
+            raise InternalError(406, "This user have already been banned")
+
+        raise Return({
+            "id": ban_id
+        })
+
+    @coroutine
+    def get_ban(self, gamespace, ban_id):
+        bans = self.application.bans
+
+        try:
+            ban = yield bans.get_ban(gamespace, ban_id)
+        except ValidationError as e:
+            raise InternalError(400, e.message)
+        except BanError as e:
+            raise InternalError(409, e.message)
+        except NoSuchBan:
+            raise InternalError(404, "No such ban")
+
+        raise Return({
+            "ban": ban.dump()
+        })
+
+    @coroutine
+    def update_ban(self, gamespace, ban_id, reason, expires):
+        bans = self.application.bans
+
+        try:
+            yield bans.update_ban(gamespace, ban_id, expires, reason)
+        except ValidationError as e:
+            raise InternalError(400, e.message)
+        except BanError as e:
+            raise InternalError(409, e.message)
+
+        raise Return("OK")
+
+    @coroutine
+    def delete_ban(self, gamespace, ban_id):
+        bans = self.application.bans
+
+        try:
+            yield bans.delete_ban(gamespace, ban_id)
+        except ValidationError as e:
+            raise InternalError(400, e.message)
+        except BanError as e:
+            raise InternalError(409, e.message)
+
+        raise Return("OK")
+
+    @coroutine
+    def find_ban(self, gamespace, account_id):
+        bans = self.application.bans
+
+        try:
+            ban = yield bans.get_active_ban_by_account(gamespace, account_id)
+        except ValidationError as e:
+            raise InternalError(400, e.message)
+        except BanError as e:
+            raise InternalError(409, e.message)
+        except NoSuchBan:
+            raise InternalError(404, "No such ban")
+
+        raise Return({
+            "ban": ban.dump()
+        })
 
 
 class JoinHandler(AuthenticatedHandler):
@@ -1000,3 +1078,104 @@ class SimplePartyHandler(AuthenticatedHandler):
             raise HTTPError(404, "No such party")
 
         self.dumps(result or {})
+
+
+class IssueBanHandler(AuthenticatedHandler):
+    @scoped(scopes=["game_ban"])
+    @coroutine
+    def post(self):
+        bans = self.application.bans
+
+        account_id = self.get_argument("account")
+        reason = self.get_argument("reason")
+        expires = self.get_argument("expires")
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            ban_id = yield bans.new_ban(gamespace, account_id, expires, reason)
+        except ValidationError as e:
+            raise HTTPError(400, e.message)
+        except BanError as e:
+            raise HTTPError(500, e.message)
+        except UserAlreadyBanned:
+            raise HTTPError(406, "This user have already been banned")
+
+        self.dumps({
+            "id": ban_id
+        })
+
+
+class BanHandler(AuthenticatedHandler):
+    @scoped(scopes=["game_ban"])
+    @coroutine
+    def get(self, ban_id):
+        bans = self.application.bans
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            ban = yield bans.get_ban(gamespace, ban_id)
+        except ValidationError as e:
+            raise HTTPError(400, e.message)
+        except BanError as e:
+            raise HTTPError(409, e.message)
+        except NoSuchBan:
+            raise HTTPError(404, "No such ban")
+
+        self.dumps({
+            "ban": ban.dump()
+        })
+
+    @scoped(scopes=["game_ban"])
+    @coroutine
+    def post(self, ban_id):
+        bans = self.application.bans
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        reason = self.get_argument("reason")
+        expires = self.get_argument("expires")
+
+        try:
+            yield bans.update_ban(gamespace, ban_id, expires, reason)
+        except ValidationError as e:
+            raise HTTPError(400, e.message)
+        except BanError as e:
+            raise HTTPError(409, e.message)
+
+    @scoped(scopes=["game_ban"])
+    @coroutine
+    def delete(self, ban_id):
+        bans = self.application.bans
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            yield bans.delete_ban(gamespace, ban_id)
+        except ValidationError as e:
+            raise HTTPError(400, e.message)
+        except BanError as e:
+            raise HTTPError(409, e.message)
+
+
+class FindBanHandler(AuthenticatedHandler):
+    @scoped(scopes=["game_ban"])
+    @coroutine
+    def get(self, account_id):
+        bans = self.application.bans
+
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            ban = yield bans.get_active_ban_by_account(gamespace, account_id)
+        except ValidationError as e:
+            raise HTTPError(400, e.message)
+        except BanError as e:
+            raise HTTPError(409, e.message)
+        except NoSuchBan:
+            raise HTTPError(404, "No such ban")
+
+        self.dumps({
+            "ban": ban.dump()
+        })
