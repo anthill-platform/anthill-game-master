@@ -107,7 +107,7 @@
                         "server": name
                     }).done(function(response)
                     {
-                        s.logs.html(response.stream);
+                        //
                     });
                 }
                 else
