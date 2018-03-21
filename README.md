@@ -45,6 +45,14 @@ may be grouped by a Region.
 * **Region**. Region is a group of Hosts (even with a single one) that physically located on a same geographical region
 (or Data Center). Players may search rooms only on certain Region to ensure low latency.
 
+* **Party**. In certain cases, partying players together is required before (or without) the actual Game Server being instantiated:
+  
+  * You want to start the Game Server only when full room of people is matched;
+  * Players want to discuss the future map / game mode before starting the game;
+  * Players want to join a random game with their friends.
+  
+  Please see <a href="doc/Party.md">Party Documentation</a> for more information.
+
 ## Overall Architecture
 
 <center>

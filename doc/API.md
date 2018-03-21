@@ -254,6 +254,8 @@ If the request is successful, the Controller will respond:
 ```json
 {
     "access_token": "<Player's access token>",
+    "account": "<Player's account id>",
+    "info": { ... custom player's info },
     "scopes": ["<A list of Player's access token scopes>"]
 }
 ```
