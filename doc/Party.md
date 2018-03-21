@@ -1,6 +1,6 @@
 # Wha The Party Is
 
-Party is an group of members (potentially players) that can be created without actually instantiating a <a href="../Readme.md#game-server">Game Server</a>. 
+Party is an group of members (potentially players) that can be created without actually instantiating a <a href="https://github.com/anthill-platform/anthill-game-master#concepts">Game Server</a>. 
 
 In certain cases, partying players together is even required before the actual Game Server being started up:
   
@@ -37,7 +37,7 @@ Additional properties:
 | `max_members`    | (Optional) Maximum number of party members, default is `8` |
 | `auto_start`     | (Optional) If `true` (default), the party will automatically start once the party gets full (reaching `max_members` number of members). If `false`, nothing will happen.
 | `auto_close`     | (Optional) If `true` (default), the party will be destroyed automatically once the last member leaves. If `false`, the empty party will remain.
-| `region`         | (Optional) A <a href="../Readme.md#region">Region</a> to start the Game Server on, default is picked automatically upon party creator's IP. |
+| `region`         | (Optional) A <a href="https://github.com/anthill-platform/anthill-game-master#concepts">Region</a> to start the Game Server on, default is picked automatically upon party creator's IP. |
 | `close_callback` | (Optional) If defined, a callback function of the <a href="https://github.com/anthill-platform/anthill-exec">Exec Service</a> with that name that will be called once the party is closed (see `Server Code`). Please note that this function should allow calling (`allow_call = true`)
 
 # Member Properties
@@ -68,6 +68,12 @@ The actual communication is made within <a href="http://www.jsonrpc.org/specific
 Current Party Member -> { request JSON object } -> Game Service
 Current Party Member  <- { response JSON object } <- Game Service
 ```
+
+### Party Session Joining
+
+The member can either join the party, or not. In both cases the connection can still remain. `max_members` only applies to joined members, so there can be more connected sessions to a party than a maximum members capacity.
+
+Party members can be "not joined" into the party and still send and receive messages. That make the whole `join` functionality to be more like `ready`.
 
 ### Session Methods
 
