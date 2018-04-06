@@ -439,7 +439,7 @@ class PlayersGroup(object):
 
         create_members = [
             (token, {
-                "multi:id": self.group_id
+                "multi_id": self.group_id
             })
             for token in self.tokens
         ]
@@ -521,7 +521,7 @@ class PlayersGroup(object):
 
         join_members = [
             (token, {
-                "multi:id": self.group_id
+                "multi_id": self.group_id
             })
             for token in self.tokens
         ]

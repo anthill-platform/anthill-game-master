@@ -208,9 +208,9 @@ Please see for REST API methods marked with <img width="16" src="https://user-im
 
 A Game Server can detect if it's being launched in a party context with environment variables.
 
-* `party:id` is such environment variable exists, then the Game Server is started in party context, and the variable contains id of the party. Please note this can be used for references only as the actual party may be destroyed at that point.
-* `party:settings` a `party_settings` from <a href="#party-properties">Party Properties</a>.
-* `party:members` a JSON object with initial party members list in following format:
+* `party_id` is such environment variable exists, then the Game Server is started in party context, and the variable contains id of the party. Please note this can be used for references only as the actual party may be destroyed at that point.
+* `party_settings` a `party_settings` from <a href="#party-properties">Party Properties</a>.
+* `party_members` a JSON object with initial party members list in following format:
 
    ```
    {
@@ -227,7 +227,7 @@ A Game Server can detect if it's being launched in a party context with environm
 
 In some cases, party members can join the Game Server way after creation of it. For example, if `room_filter` is defined inside the party, the existing Game Server will be searched before creating a new one. In that case the party members may connect to existing Game Server that was spawned by another party (or without any party at all).
 
-To deal with this, a Game Server can identify a party member by parsing the `info` object of the `joined` controller request response. The `info` object may contain these fields: `party:id`, `party:profile`, `party:role`, their definitions are described above.
+To deal with this, a Game Server can identify a party member by parsing the `info` object of the `joined` controller request response. The `info` object may contain these fields: `party_id`, `party_profile`, `party_role`, their definitions are described above.
 
 See <a href="API.md#2-connecting">Game Controller Connecting Flow</a> for the information about the `joined` request.
 

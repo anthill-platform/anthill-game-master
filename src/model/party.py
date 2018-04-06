@@ -168,9 +168,9 @@ class PartySession(object):
 
         members = [
             (AccessToken(member.token), {
-                "party:id": str(party.id),
-                "party:profile": member.profile,
-                "party:role": member.role
+                "party_id": str(party.id),
+                "party_profile": member.profile,
+                "party_role": member.role
             })
             for member in members
         ]
@@ -263,9 +263,9 @@ class PartySession(object):
 
         create_members = [
             (AccessToken(member.token), {
-                "party:id": str(party.id),
-                "party:profile": member.profile,
-                "party:role": member.role
+                "party_id": str(party.id),
+                "party_profile": member.profile,
+                "party_role": member.role
             })
             for member in members
         ]
@@ -285,9 +285,9 @@ class PartySession(object):
         }
 
         other_settings = {
-            "party:id": str(party.id),
-            "party:settings": ujson.dumps(party.settings),
-            "party:members": ujson.dumps(party_members)
+            "party_id": str(party.id),
+            "party_settings": ujson.dumps(party.settings),
+            "party_members": ujson.dumps(party_members)
         }
 
         try:

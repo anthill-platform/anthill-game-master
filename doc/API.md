@@ -47,13 +47,13 @@ section of the Game Server Configuration.
 
 Alongside with those arguments, depending of Game Server Configuration, a bunch of Environment variables can be defined:
 * Those who defined in `Environment Variables` section of the Game Server Configuration.
-* `login:access_token` A complete and working [Access Token](https://github.com/anthill-services/anthill-login#access-tokens)
+* `login_access_token` A complete and working [Access Token](https://github.com/anthill-services/anthill-login#access-tokens)
 instance of server-side use. See `Access token` section of the Game Server Configuration.
-* `discovery:services` A JSON Object with predefined key/value list of service locations for
+* `discovery_services` A JSON Object with predefined key/value list of service locations for
 server-side use. See `Discover Services` section of the Game Server Configuration.
-* `game:max_players` Maximum players the room can take (on which this Game Server is spawned upon).
-* `room:settings` A JSON Object with custom room settings as defined by player.
-* `server:settings` A JSON Object with Custom Server Configuration Settings (see according section of 
+* `game_max_players` Maximum players the room can take (on which this Game Server is spawned upon).
+* `room_settings` A JSON Object with custom room settings as defined by player.
+* `server_settings` A JSON Object with Custom Server Configuration Settings (see according section of
 the Game Server Configuration).
 
 ### 6. Communication between Game Server and Controller Service

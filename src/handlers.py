@@ -448,7 +448,7 @@ class RoomsHandler(AuthenticatedHandler):
             "rooms": [
                 room.dump()
                 for room in rooms
-                ]
+            ]
         })
 
 
@@ -461,7 +461,7 @@ class RegionsHandler(AuthenticatedHandler):
         try:
             regions = yield hosts.list_regions()
         except RegionError as e:
-            raise HTTPError(e.code, e.message)
+            raise HTTPError(500, e.message)
 
         ip = remote_ip(self.request)
 
@@ -519,10 +519,9 @@ class StatusHandler(AuthenticatedHandler):
 class PlayerRecordsHandler(AuthenticatedHandler):
     @scoped(scopes=["game"])
     @coroutine
-    def get(self):
+    def get(self, account_id):
 
         gamespace = self.token.get(AccessToken.GAMESPACE)
-        account_id = self.token.account
 
         try:
             players_records = yield self.application.rooms.list_player_records(
