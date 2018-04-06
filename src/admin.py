@@ -132,7 +132,7 @@ class GameServerController(a.AdminController):
                     "primary", "non-empty", schema=GameServersModel.GAME_SETTINGS_SCHEME, order=1),
                 "server_settings": a.field(
                     "Custom Server Configuration Settings (set as "
-                    "<span class=\"label label-default\">server:settings</span> environment variable)",
+                    "<span class=\"label label-default\">server_settings</span> environment variable)",
                     "dorn", "primary", "non-empty", schema=data["schema"], order=2),
                 "max_players": a.field("Max players per room", "text", "primary", "number", order=4),
                 "schema": a.field(
