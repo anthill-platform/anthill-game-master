@@ -860,8 +860,8 @@ class PartyModel(Model):
         self.party_broker = RabbitMQConnection(party_broker, "game.party-queues")
 
     @coroutine
-    def started(self):
-        yield super(PartyModel, self).started()
+    def started(self, application):
+        yield super(PartyModel, self).started(application)
         yield self.party_broker.wait_connect()
 
     def get_setup_db(self):

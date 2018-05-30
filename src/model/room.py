@@ -326,8 +326,8 @@ class RoomsModel(Model):
                 host_id=host.host_id)
 
     @coroutine
-    def started(self):
-        yield super(RoomsModel, self).started()
+    def started(self, application):
+        yield super(RoomsModel, self).started(application)
         if self.monitoring_report_callback:
             self.monitoring_report_callback.start()
             yield self.__update_monitoring_status__()

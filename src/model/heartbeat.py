@@ -39,8 +39,8 @@ class HeartbeatModel(Model):
         self.processing = False
 
     @coroutine
-    def started(self):
-        yield super(HeartbeatModel, self).started()
+    def started(self, application):
+        yield super(HeartbeatModel, self).started(application)
         self.update_cb.start()
 
     @coroutine

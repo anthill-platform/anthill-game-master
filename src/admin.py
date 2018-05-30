@@ -2583,7 +2583,11 @@ class RoomsController(a.AdminController):
                 "game_host": a.field("Game Host",
                                      "select", "primary", values=data["game_hosts"], order=5),
                 "game_settings": a.field("Game Custom Settings",
-                                         "json", "primary", order=6, height=120),
+                                         "json", "primary", order=6, height=120,
+                                         description="""
+                                            Please read <a href="https://docs.anthillplatform.org/en/latest/other/dbquery.html" target="_blank">this document</a>
+                                            for the query format.
+                                         """),
             }, methods={
                 "filter": a.method("Filter rooms", "primary")
             }, data=data, icon="filter")
