@@ -41,8 +41,6 @@ class GameMasterServer(common.server.Server):
             db=options.cache_db,
             max_connections=options.cache_max_connections)
 
-        self.env_service = common.environment.EnvironmentClient(self.cache)
-
         self.gameservers = GameServersModel(self.db)
         self.hosts = HostsModel(self.db)
         self.rooms = RoomsModel(self, self.db, self.hosts)

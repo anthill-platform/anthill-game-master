@@ -4,7 +4,7 @@ from tornado.gen import coroutine, Return, IOLoop
 import tornado.httpclient
 
 import common.admin as a
-from common.environment import AppNotFound
+from common.environment import EnvironmentClient, AppNotFound
 from common.database import format_conditions_json, ConditionError
 from common.validate import validate
 
@@ -34,11 +34,11 @@ class ApplicationController(a.AdminController):
     @coroutine
     def get(self, record_id):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(record_id)
+            app = yield environment_client.get_app_info(record_id)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -47,13 +47,13 @@ class ApplicationController(a.AdminController):
         except GameError as e:
             raise a.ActionError("Failed to list game servers: " + e.message)
 
-        app_versions = app["versions"].keys()
+        app_versions = app.versions.keys()
         app_versions.sort()
 
         result = {
             "app_id": record_id,
-            "app_record_id": app["id"],
-            "app_name": app["title"],
+            "app_record_id": app.id,
+            "app_name": app.title,
             "versions": app_versions,
             "game_servers": servers
         }
@@ -92,11 +92,11 @@ class GameServerController(a.AdminController):
     @coroutine
     def get(self, game_server_id, game_name):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -106,7 +106,7 @@ class GameServerController(a.AdminController):
             raise a.ActionError("No such game server")
 
         result = {
-            "app_name": app["title"],
+            "app_name": app.title,
             "max_players": gs.max_players,
             "game_settings": gs.game_settings,
             "server_settings": gs.server_settings,
@@ -159,11 +159,11 @@ class GameServerController(a.AdminController):
         game_server_id = self.context.get("game_server_id")
         game_name = self.context.get("game_name")
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            yield env_service.get_app_info(game_name)
+            yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -183,7 +183,7 @@ class GameServerController(a.AdminController):
         game_server_id = self.context.get("game_server_id")
         game_name = self.context.get("game_name")
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
@@ -193,7 +193,7 @@ class GameServerController(a.AdminController):
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield env_service.get_app_info(game_name)
+            yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -220,16 +220,16 @@ class NewGameServerController(a.AdminController):
     @coroutine
     def get(self, game_name, game_server_id=None):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         result = {
-            "app_name": app["title"],
+            "app_name": app.title,
             "schema": GameServersModel.DEFAULT_SERVER_SCHEME,
             "max_players": "8"
         }
@@ -284,7 +284,7 @@ class NewGameServerController(a.AdminController):
 
         game_name = self.context.get("game_name")
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
@@ -293,7 +293,7 @@ class NewGameServerController(a.AdminController):
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield env_service.get_app_info(game_name)
+            yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -347,11 +347,11 @@ class GameServerVersionController(a.AdminController):
     @coroutine
     def get(self, game_name, game_version, game_server_id):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -368,7 +368,7 @@ class GameServerVersionController(a.AdminController):
             version_settings = {}
 
         result = {
-            "app_name": app["title"],
+            "app_name": app.title,
             "version_settings": version_settings,
             "game_server_name": gs.name,
             "schema": gs.schema
@@ -580,12 +580,12 @@ class ApplicationVersionController(a.AdminController):
     @coroutine
     def get(self, app_id, version_id, page=1):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
         deployments = self.application.deployments
 
         try:
-            app = yield env_service.get_app_info(app_id)
+            app = yield environment_client.get_app_info(app_id)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -613,7 +613,7 @@ class ApplicationVersionController(a.AdminController):
 
         result = {
             "app_id": app_id,
-            "app_name": app["title"],
+            "app_name": app.title,
             "servers": servers,
             "deployments": game_deployments,
             "pages": pages,
@@ -955,12 +955,12 @@ class ApplicationDeploymentController(a.AdminController):
     @coroutine
     def get(self, game_name, game_version, deployment_id):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         deployments = self.application.deployments
         hosts = self.application.hosts
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -983,7 +983,7 @@ class ApplicationDeploymentController(a.AdminController):
             raise a.ActionError("Failed to list hosts: " + e.message)
 
         result = {
-            "app_name": app["title"],
+            "app_name": app.title,
             "deployment_status_value": deployment.status,
             "deployment_status": deployment.status.title(),
             "deliveries": deliveries,
@@ -1078,7 +1078,7 @@ class ApplicationDeploymentController(a.AdminController):
     @coroutine
     def deliver(self, **ignored):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         deployments = self.application.deployments
         hosts = self.application.hosts
 
@@ -1087,7 +1087,7 @@ class ApplicationDeploymentController(a.AdminController):
         deployment_id = self.context.get("deployment_id")
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -1126,15 +1126,15 @@ class DeployApplicationController(a.UploadAdminController):
     @coroutine
     def get(self, game_name, game_version):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         result = {
-            "app_name": app["title"],
+            "app_name": app.title,
             "switch_to_new": "true"
         }
 
@@ -1154,14 +1154,14 @@ class DeployApplicationController(a.UploadAdminController):
         deployments = self.application.deployments
         location = deployments.deployments_location
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
         else:
-            versions = app["versions"]
+            versions = app.versions
             if not game_version in versions:
                 raise a.ActionError("No such app version")
 
@@ -1413,8 +1413,8 @@ class RootAdminController(a.AdminController):
     @coroutine
     def get(self):
 
-        env_service = self.application.env_service
-        apps = yield env_service.list_apps()
+        environment_client = EnvironmentClient(self.application.cache)
+        apps = yield environment_client.list_apps()
 
         hosts = self.application.hosts
 
@@ -2004,18 +2004,18 @@ class SpawnRoomController(a.AdminController):
     @coroutine
     def get(self, game_name):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
         hosts = self.application.hosts
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         game_versions = {
             v_name: v_name
-            for v_name, v_id in app["versions"].iteritems()
+            for v_name, v_id in app.versions.iteritems()
         }
 
         try:
@@ -2040,7 +2040,7 @@ class SpawnRoomController(a.AdminController):
 
         raise Return({
             "game_name": game_name,
-            "game_title": app["title"],
+            "game_title": app.title,
             "game_versions": game_versions,
             "game_servers": game_servers,
             "game_regions": game_regions,
@@ -2054,7 +2054,7 @@ class SpawnRoomController(a.AdminController):
               max_players="int", custom_settings="load_json_dict")
     def spawn(self, game_version, game_server_id, region_id, room_settings, custom_settings, max_players=0):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         hosts = self.application.hosts
         rooms = self.application.rooms
         gameservers = self.application.gameservers
@@ -2062,7 +2062,7 @@ class SpawnRoomController(a.AdminController):
         game_name = self.context.get("game_name")
 
         try:
-            yield env_service.get_app_info(game_name)
+            yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -2165,7 +2165,7 @@ class RoomController(a.AdminController):
     def get(self, room_id):
 
         rooms = self.application.rooms
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
 
         try:
             room = yield rooms.get_room(self.gamespace, room_id)
@@ -2175,13 +2175,13 @@ class RoomController(a.AdminController):
             raise a.ActionError(e.message)
 
         try:
-            app = yield env_service.get_app_info(room.game_name)
+            app = yield environment_client.get_app_info(room.game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         raise Return({
             "game_name": room.game_name,
-            "game_title": app["title"]
+            "game_title": app.title
         })
 
     @coroutine
@@ -2288,19 +2288,19 @@ class RoomsController(a.AdminController):
             game_region=None,
             game_host=None):
 
-        env_service = self.application.env_service
+        environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
         deployments = self.application.deployments
         hosts = self.application.hosts
 
         try:
-            app = yield env_service.get_app_info(game_name)
+            app = yield environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         game_versions = {
             v_name: v_name
-            for v_name, v_id in app["versions"].iteritems()
+            for v_name, v_id in app.versions.iteritems()
         }
 
         game_versions[""] = "Any"
@@ -2398,7 +2398,7 @@ class RoomsController(a.AdminController):
 
         result = {
             "game_name": game_name,
-            "game_title": app["title"],
+            "game_title": app.title,
 
             "game_versions": game_versions,
             "game_version": game_version,
