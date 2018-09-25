@@ -1,20 +1,20 @@
-from tornado.gen import coroutine, Return, IOLoop
+from tornado.gen import IOLoop, multi
 
-from common.validate import validate
-from common.model import Model
-from common.database import DatabaseError, format_conditions_json, ConditionError
-from common.rabbitconn import RabbitMQConnection
-from common.options import options
-from common.ratelimit import RateLimitExceeded
-from common.access import AccessToken
-from common.profile import PredefinedProfile, ProfileError
-from common.internal import Internal, InternalError
-from common import Enum, Flags
+from anthill.common.validate import validate
+from anthill.common.model import Model
+from anthill.common.database import DatabaseError, format_conditions_json, ConditionError
+from anthill.common.rabbitconn import RabbitMQConnection
+from anthill.common.options import options
+from anthill.common.ratelimit import RateLimitExceeded
+from anthill.common.access import AccessToken
+from anthill.common.profile import PredefinedProfile, ProfileError
+from anthill.common.internal import Internal, InternalError
+from anthill.common import Enum, Flags
 
-from gameserver import GameServerNotFound, GameVersionNotFound
-from deploy import NoCurrentDeployment
-from host import HostNotFound
-from room import RoomError, RoomNotFound
+from .gameserver import GameServerNotFound, GameVersionNotFound
+from .deploy import NoCurrentDeployment
+from .host import HostNotFound
+from .room import RoomError, RoomNotFound
 
 import ujson
 import logging
@@ -162,9 +162,8 @@ class PartySession(object):
             ]
         }
 
-    @coroutine
     @validate(room_settings="json_dict")
-    def __join_server__(self, members, party):
+    async def __join_server__(self, members, party):
 
         members = [
             (AccessToken(member.token), {
@@ -175,7 +174,7 @@ class PartySession(object):
             for member in members
         ]
 
-        records, room = yield self.parties.rooms.find_and_join_room_multi(
+        records, room = await self.parties.rooms.find_and_join_room_multi(
             self.gamespace_id, self.party.game_name, self.party.game_version,
             self.party.game_server_id, members, self.party.room_filters, region=self.party.region_id)
 
@@ -186,7 +185,7 @@ class PartySession(object):
         location = room.location
         settings = room.room_settings
 
-        yield [self.send_message(
+        await multi([self.send_message(
             PartySession.MESSAGE_TYPE_GAME_STARTED, {
                 "id": str(self.room_id),
                 "slot": str(record_id),
@@ -194,8 +193,8 @@ class PartySession(object):
                 "location": location,
                 "settings": settings
             }, account_id=account)
-            for account, (record_id, key) in records.iteritems()
-            if str(account) != self.account_id]
+            for account, (record_id, key) in records.items()
+            if str(account) != self.account_id])
 
         my_record = records.get(str(self.account_id))
 
@@ -204,7 +203,7 @@ class PartySession(object):
 
         my_record_id, my_key = my_record
 
-        yield self.__process_message__(PartySession.MESSAGE_TYPE_GAME_STARTED, {
+        await self.__process_message__(PartySession.MESSAGE_TYPE_GAME_STARTED, {
             "id": str(self.room_id),
             "slot": str(my_record_id),
             "key": str(my_key),
@@ -212,18 +211,17 @@ class PartySession(object):
             "settings": settings
         })
 
-    @coroutine
     @validate(room_settings="json_dict")
-    def __spawn_server__(self, members, party):
+    async def __spawn_server__(self, members, party):
 
         room_settings = {
             key: value
-            for key, value in self.party.room_settings.iteritems()
-            if isinstance(value, (str, unicode, int, float, bool))
+            for key, value in self.party.room_settings.items()
+            if isinstance(value, (str, int, float, bool))
         }
 
         try:
-            deployment = yield self.parties.deployments.get_current_deployment(
+            deployment = await self.parties.deployments.get_current_deployment(
                 self.gamespace_id, self.party.game_name, self.party.game_version)
         except NoCurrentDeployment:
             raise PartyError(404, "No deployment defined for {0}/{1}".format(
@@ -236,23 +234,23 @@ class PartySession(object):
         deployment_id = deployment.deployment_id
 
         try:
-            limit = yield self.parties.ratelimit.limit("create_room", self.account_id)
+            limit = await self.parties.ratelimit.limit("create_room", self.account_id)
         except RateLimitExceeded:
             raise PartyError(429, "Too many requests")
 
         try:
-            host = yield self.parties.hosts.get_best_host(self.party.region_id)
+            host = await self.parties.hosts.get_best_host(self.party.region_id)
         except HostNotFound:
             raise PartyError(503, "Not enough hosts")
 
         try:
-            gs = yield self.parties.gameservers.get_game_server(
+            gs = await self.parties.gameservers.get_game_server(
                 self.gamespace_id, self.party.game_name, self.party.game_server_id)
         except GameServerNotFound:
             raise PartyError(404, "No such gameserver")
 
         try:
-            server_settings = yield self.parties.gameservers.get_version_game_server(
+            server_settings = await self.parties.gameservers.get_version_game_server(
                 self.gamespace_id, self.party.game_name, self.party.game_version, gs.game_server_id)
         except GameVersionNotFound:
             logging.info("Applied default config for version '{0}'".format(self.party.game_version))
@@ -270,7 +268,7 @@ class PartySession(object):
             for member in members
         ]
 
-        records, self.room_id = yield self.parties.rooms.create_and_join_room_multi(
+        records, self.room_id = await self.parties.rooms.create_and_join_room_multi(
             self.gamespace_id, self.party.game_name, self.party.game_version,
             gs, room_settings, create_members, host, deployment_id, trigger_remove=False)
 
@@ -291,26 +289,26 @@ class PartySession(object):
         }
 
         try:
-            result = yield self.parties.rooms.spawn_server(
+            result = await self.parties.rooms.spawn_server(
                 self.gamespace_id, self.party.game_name, self.party.game_version, gs.name,
                 deployment_id, self.room_id, host, gs.game_settings, server_settings,
                 room_settings, other_settings=other_settings)
         except RoomError as e:
-            yield self.parties.rooms.remove_room(self.gamespace_id, self.room_id)
+            await self.parties.rooms.remove_room(self.gamespace_id, self.room_id)
             logging.exception("Failed to spawn a server")
-            yield limit.rollback()
+            await limit.rollback()
             raise PartyError(500, e.message)
 
         updated_room_settings = result.get("settings")
 
         if updated_room_settings:
             room_settings.update(updated_room_settings)
-            yield self.parties.rooms.update_room_settings(self.gamespace_id, self.room_id, room_settings)
+            await self.parties.rooms.update_room_settings(self.gamespace_id, self.room_id, room_settings)
 
         self.parties.rooms.trigger_remove_temp_reservation_multi(
             self.gamespace_id, self.room_id, [member.account for member in members])
 
-        yield [self.send_message(
+        await [self.send_message(
             PartySession.MESSAGE_TYPE_GAME_STARTED, {
                 "id": str(self.room_id),
                 "slot": str(record_id),
@@ -318,7 +316,7 @@ class PartySession(object):
                 "location": result.get("location"),
                 "settings": room_settings
             }, account_id=account)
-            for account, (record_id, key) in records.iteritems()
+            for account, (record_id, key) in records.items()
             if str(account) != self.account_id]
 
         my_record = records.get(str(self.account_id))
@@ -328,7 +326,7 @@ class PartySession(object):
 
         my_record_id, my_key = my_record
 
-        yield self.__process_message__(PartySession.MESSAGE_TYPE_GAME_STARTED, {
+        await self.__process_message__(PartySession.MESSAGE_TYPE_GAME_STARTED, {
             "id": str(self.room_id),
             "slot": str(my_record_id),
             "key": str(my_key),
@@ -337,23 +335,19 @@ class PartySession(object):
         })
 
     # noinspection PyUnusedLocal
-    @coroutine
-    def __party_closed__(self, message_type, payload):
-        yield self.close(3410, "Party closed")
+    async def __party_closed__(self, message_type, payload):
+        await self.close(3410, "Party closed")
 
     # noinspection PyUnusedLocal
-    @coroutine
-    def __game_started__(self, message_type, payload):
-        yield self.close(3411, "Game started")
+    async def __game_started__(self, message_type, payload):
+        await self.close(3411, "Game started")
 
     # noinspection PyUnusedLocal
-    @coroutine
-    def __has_to_be_joined__(self, message_type, payload):
+    async def __has_to_be_joined__(self, message_type, payload):
         return self.is_joined
 
-    @coroutine
     @validate(message_payload="json_dict")
-    def close_party(self, message_payload):
+    async def close_party(self, message_payload):
 
         if self.released:
             raise PartyError(410, "Party is released")
@@ -361,21 +355,20 @@ class PartySession(object):
         if self.role < PartyModel.PARTY_PERMISSION_CLOSE:
             raise PartyError(403, "Not enough permissions to close party")
 
-        yield self.parties.close_party(self.gamespace_id, self.party.id, message_payload)
+        await self.parties.close_party(self.gamespace_id, self.party.id, message_payload)
 
-    @coroutine
     @validate()
-    def leave_party(self):
+    async def leave_party(self):
         if self.released:
             raise PartyError(410, "Party is released")
 
         if not self.is_joined:
             raise PartyError(410, "Not joined")
 
-        yield self.parties.__remove_party_member__(
+        await self.parties.__remove_party_member__(
             self.gamespace_id, self.party.id, self.account_id, add_member=True)
 
-        yield self.send_message(PartySession.MESSAGE_TYPE_PLAYER_LEFT, {
+        await self.send_message(PartySession.MESSAGE_TYPE_PLAYER_LEFT, {
             "account": self.account_id,
             "profile": self.member_profile
         })
@@ -383,9 +376,8 @@ class PartySession(object):
         self.is_joined = False
         self.member_profile = None
 
-    @coroutine
     @validate(member_profile="json_dict", check_members="json_dict")
-    def join_party(self, member_profile, check_members=None):
+    async def join_party(self, member_profile, check_members=None):
 
         if self.released:
             raise PartyError(410, "Party is released")
@@ -393,9 +385,9 @@ class PartySession(object):
         if self.is_joined:
             raise PartyError(409, "Already joined")
 
-        with (yield self.db.acquire(auto_commit=False)) as db:
+        async with self.db.acquire(auto_commit=False) as db:
             try:
-                party_data = yield db.get(
+                party_data = await db.get(
                     """
                     SELECT *
                     FROM `parties`
@@ -415,7 +407,7 @@ class PartySession(object):
                 if party.party_num_members >= party.party_max_members:
                     raise PartyError(406, "Party is full")
 
-                members = yield self.parties.list_party_members(self.gamespace_id, self.party.id, db=db)
+                members = await self.parties.list_party_members(self.gamespace_id, self.party.id, db=db)
 
                 if check_members:
                     merged_profiles = PredefinedProfile({
@@ -423,7 +415,7 @@ class PartySession(object):
                     })
 
                     try:
-                        yield merged_profiles.set_data(check_members, None, merge=True)
+                        await merged_profiles.set_data(check_members, None, merge=True)
                     except ProfileError as e:
                         raise PartyError(409, "Member check failed: " + str(e.message))
 
@@ -433,7 +425,7 @@ class PartySession(object):
                 self.party.party_max_members = party.party_max_members
 
                 try:
-                    yield db.insert(
+                    await db.insert(
                         """
                         INSERT INTO `party_members`
                         (`account_id`, `gamespace_id`, `party_id`, `member_role`, 
@@ -443,13 +435,13 @@ class PartySession(object):
                         PartyModel.PARTY_ROLE_USER, ujson.dumps(member_profile), self.token)
                 except DatabaseError as e:
                     # well, we've tried
-                    yield db.rollback()
+                    await db.rollback()
                     raise PartyError(500, "Failed to join a party: " + e.args[1])
 
                 self.joined(member_profile, send_new_player=True)
 
                 try:
-                    yield db.execute(
+                    await db.execute(
                         """
                         UPDATE `parties`
                         SET `party_num_members`=%s
@@ -462,24 +454,22 @@ class PartySession(object):
                 self.is_joined = True
 
             finally:
-                yield db.commit()
+                await db.commit()
 
-            yield self.send_message(PartySession.MESSAGE_TYPE_PLAYER_JOINED, {
+            await self.send_message(PartySession.MESSAGE_TYPE_PLAYER_JOINED, {
                 "account": self.account_id,
                 "profile": self.member_profile})
 
             self.__check_auto_start__()
             IOLoop.current().add_callback(self.start_game_if_needed)
 
-    @coroutine
     @validate(message_payload="json_dict")
-    def start_game(self, message_payload):
+    async def start_game(self, message_payload):
 
-        yield self.__start_game__(message_payload)
+        await self.__start_game__(message_payload)
 
-    @coroutine
     @validate(message_payload="json_dict")
-    def __start_game__(self, message_payload, check_permissions=True):
+    async def __start_game__(self, message_payload, check_permissions=True):
 
         if self.released:
             raise PartyError(410, "Party is released")
@@ -488,9 +478,9 @@ class PartySession(object):
             if self.role < PartyModel.PARTY_PERMISSION_START:
                 raise PartyError(403, "Not enough permissions to start a game")
 
-        with (yield self.db.acquire(auto_commit=False)) as db:
+        async with self.db.acquire(auto_commit=False) as db:
             try:
-                party_data = yield db.get(
+                party_data = await db.get(
                     """
                     SELECT *
                     FROM `parties`
@@ -507,7 +497,7 @@ class PartySession(object):
                 if party.status != PartyStatus.CREATED:
                     raise PartyError(409, "Party have already started a game")
 
-                yield db.execute(
+                await db.execute(
                     """
                     UPDATE `parties`
                     SET `party_status`=%s
@@ -515,9 +505,9 @@ class PartySession(object):
                     LIMIT 1;
                     """, PartyStatus.STARTING, self.gamespace_id, self.party.id)
 
-                members = yield self.parties.list_party_members(self.gamespace_id, self.party.id, db=db)
-                yield db.commit()
-                yield self.send_message(PartySession.MESSAGE_TYPE_GAME_STARTING, message_payload)
+                members = await self.parties.list_party_members(self.gamespace_id, self.party.id, db=db)
+                await db.commit()
+                await self.send_message(PartySession.MESSAGE_TYPE_GAME_STARTING, message_payload)
 
                 # hold a reference for a moment as self.parties will become None as soon as 'game_started' is received
                 parties = self.parties
@@ -525,29 +515,29 @@ class PartySession(object):
                 try:
                     if party.room_filters is None:
                         logging.info("Party spawning new server: {0}".format(party.id))
-                        yield self.__spawn_server__(members, party)
+                        await self.__spawn_server__(members, party)
                     else:
                         # if filters is defined, that means we need to find a matching server first
                         try:
                             logging.info("Party joining to a server: {0}".format(party.id))
-                            yield self.__join_server__(members, party)
+                            await self.__join_server__(members, party)
                         except RoomNotFound:
                             logging.info("No rooms found, spawning new server: {0}".format(party.id))
                             # and if there's no matching rooms, create one
-                            yield self.__spawn_server__(members, party)
+                            await self.__spawn_server__(members, party)
                 except PartyError as e:
 
                     # rollback
-                    yield db.execute(
+                    await db.execute(
                         """
                         UPDATE `parties`
                         SET `party_status`=%s
                         WHERE `gamespace_id`=%s AND `party_id`=%s
                         LIMIT 1;
                         """, PartyStatus.CREATED, self.gamespace_id, self.party.id)
-                    yield db.commit()
+                    await db.commit()
 
-                    yield self.send_message(PartySession.MESSAGE_TYPE_GAME_START_FAILED, {
+                    await self.send_message(PartySession.MESSAGE_TYPE_GAME_START_FAILED, {
                         "code": e.code,
                         "reason": e.message
                     })
@@ -555,46 +545,45 @@ class PartySession(object):
                     raise e
 
                 try:
-                    yield parties.delete_party(self.gamespace_id, self.party.id, db=db)
+                    await parties.delete_party(self.gamespace_id, self.party.id, db=db)
                 except PartyError:
                     logging.exception("Failed to delete a party")
                 else:
 
                     if party.close_callback:
                         try:
-                            result = yield parties.__party_close_callback__(
-                                self.gamespace_id, party.game_name, party.game_version, party.close_callback,
+                            result = await parties.__party_close_callback__(
+                                self.gamespace_id, party.close_callback,
                                 party=party.dump(), message=message_payload, reason="game_started")
                         except PartyError:
                             logging.exception("Failed to call close_callback: {0}".format(party.close_callback))
                         else:
-                            raise Return(result)
+                            return result
 
                 self.done = True
-                raise Return("OK")
+                return "OK"
 
             except DatabaseError as e:
                 raise PartyError(500, e.args[1])
             finally:
-                yield db.commit()
+                await db.commit()
 
-    @coroutine
-    def init(self, members=None):
-        self.channel = yield self.broker.channel()
-        self.exchange = yield self.channel.exchange(
+    async def init(self, members=None):
+        self.channel = await self.broker.channel()
+        self.exchange = await self.channel.exchange(
             exchange=self.__exchange__name__(),
             exchange_type='topic',
             auto_delete=True)
 
-        self.queue = yield self.channel.queue(exclusive=True, arguments={"x-message-ttl": 1000})
+        self.queue = await self.channel.queue(exclusive=True, arguments={"x-message-ttl": 1000})
 
-        yield self.queue.bind(exchange=self.exchange, routing_key=self.__routing_key__(self.account_id))
-        yield self.queue.bind(exchange=self.exchange, routing_key="all." + str(self.gamespace_id))
+        await self.queue.bind(exchange=self.exchange, routing_key=self.__routing_key__(self.account_id))
+        await self.queue.bind(exchange=self.exchange, routing_key="all." + str(self.gamespace_id))
 
-        self.consumer = yield self.queue.consume(self.__on_message__)
+        self.consumer = await self.queue.consume(self.__on_message__)
 
         if self.send_new_player:
-            yield self.send_message(PartySession.MESSAGE_TYPE_PLAYER_JOINED, {
+            await self.send_message(PartySession.MESSAGE_TYPE_PLAYER_JOINED, {
                 "account": self.account_id,
                 "profile": self.member_profile
             })
@@ -602,7 +591,7 @@ class PartySession(object):
         if members:
             self.members = members
         else:
-            self.members = yield self.parties.list_party_members(self.gamespace_id, self.party.id)
+            self.members = await self.parties.list_party_members(self.gamespace_id, self.party.id)
 
         if self.is_joined:
             self.__check_auto_start__()
@@ -613,38 +602,36 @@ class PartySession(object):
                     self.joined(member.profile)
                     break
 
-    @coroutine
-    def start_game_if_needed(self):
+    async def start_game_if_needed(self):
         if self.need_auto_start:
-            yield self.__start_game__({
+            await self.__start_game__({
                 "auto_start": True
             }, check_permissions=False)
 
     @staticmethod
-    def drop_message(gamespace_id, party_id, broker, message_type, payload, routing_key):
+    async def drop_message(gamespace_id, party_id, broker, message_type, payload, routing_key):
 
         exchange_name = "party." + str(gamespace_id) + "." + str(party_id)
 
-        channel = yield broker.channel()
+        channel = await broker.channel()
 
         body = ujson.dumps({
             PartySession.FIELD_MESSAGE_TYPE: message_type,
             PartySession.FIELD_PAYLOAD: payload
         })
 
-        yield channel.basic_publish(
+        await channel.basic_publish(
             exchange=exchange_name,
             routing_key=routing_key,
             body=body)
 
         # noinspection PyBroadException
         try:
-            yield channel.close()
+            await channel.close()
         except Exception:
             logging.exception("Failed to close the channel")
 
-    @coroutine
-    def send_message(self, message_type, payload, account_id=None):
+    async def send_message(self, message_type, payload, account_id=None):
 
         if self.released:
             raise PartyError(410, "Party is released")
@@ -654,71 +641,67 @@ class PartySession(object):
             PartySession.FIELD_PAYLOAD: payload
         })
 
-        yield self.channel.basic_publish(
+        await self.channel.basic_publish(
             exchange=self.__exchange__name__(),
             routing_key=self.__routing_key__(account_id) if account_id else "all." + str(self.gamespace_id),
             body=body)
 
-    @coroutine
-    def close(self, code, reason):
-        yield self.release(remove_member=False)
+    async def close(self, code, reason):
+        await self.release(remove_member=False)
 
         if self.close_callback:
-            yield self.close_callback(code, reason)
+            await self.close_callback(code, reason)
 
     # noinspection PyBroadException
-    @coroutine
-    def release(self, remove_member=True, add_member_slot=True):
+    async def release(self, remove_member=True, add_member_slot=True):
 
         if self.released:
             return
 
         if (not self.done) and remove_member and self.is_joined:
-            yield self.send_message(PartySession.MESSAGE_TYPE_PLAYER_LEFT, {
+            await self.send_message(PartySession.MESSAGE_TYPE_PLAYER_LEFT, {
                 "account": self.account_id,
                 "profile": self.member_profile
             })
 
         if self.queue:
             try:
-                yield self.queue.delete()
+                await self.queue.delete()
             except Exception:
                 logging.exception("Failed to delete the queue")
 
         if self.channel:
             try:
-                yield self.channel.close()
+                await self.channel.close()
             except Exception:
                 logging.exception("Failed to close the channel")
 
         if (not self.done) and remove_member and self.is_joined:
-            yield self.parties.__remove_party_member__(
+            await self.parties.__remove_party_member__(
                 self.gamespace_id, self.party.id, self.account_id, add_member=add_member_slot)
 
         # hello gc
         self.parties = None
         self.released = True
 
-    @coroutine
-    def __process_message__(self, message_type, payload):
+    async def __process_message__(self, message_type, payload):
 
         handler_before = self.handlers_before.get(message_type, None)
 
         if handler_before:
-            cont = yield handler_before(message_type, payload)
+            cont = await handler_before(message_type, payload)
             if not cont:
                 return
 
         if self.message_callback:
-            yield self.message_callback(message_type, payload)
+            await self.message_callback(message_type, payload)
 
         handler_after = self.handlers_after.get(message_type, None)
 
         if handler_after:
-            yield handler_after(message_type, payload)
+            await handler_after(message_type, payload)
 
     # noinspection PyUnusedLocal
-    @coroutine
     def __on_message__(self, channel, method, properties, body):
 
         if self.released:
@@ -732,7 +715,7 @@ class PartySession(object):
         message_type = msg.get(PartySession.FIELD_MESSAGE_TYPE, "unknown")
         payload = msg.get(PartySession.FIELD_PAYLOAD, {})
 
-        yield self.__process_message__(message_type, payload)
+        IOLoop.current().spawn_callback(self.__process_message__, message_type, payload)
 
 
 class PartyQuery(object):
@@ -785,8 +768,7 @@ class PartyQuery(object):
 
         return conditions, data
 
-    @coroutine
-    def query(self, db, one=False, count=False):
+    async def query(self, db, one=False, count=False):
         conditions, data = self.__values__()
 
         query = """
@@ -813,19 +795,19 @@ class PartyQuery(object):
         query += ";"
 
         if one:
-            result = yield db.get(query, *data)
+            result = await db.get(query, *data)
 
             if not result:
-                raise Return(None)
+                return None
 
-            raise Return(PartyAdapter(result))
+            return PartyAdapter(result)
         else:
-            result = yield db.query(query, *data)
+            result = await db.query(query, *data)
 
             count_result = 0
 
             if count:
-                count_result = yield db.get(
+                count_result = await db.get(
                     """
                         SELECT FOUND_ROWS() AS count;
                     """)
@@ -834,9 +816,9 @@ class PartyQuery(object):
             items = map(PartyAdapter, result)
 
             if count:
-                raise Return((items, count_result))
+                return (items, count_result)
 
-            raise Return(items)
+            return items
 
 
 class PartyModel(Model):
@@ -859,10 +841,9 @@ class PartyModel(Model):
 
         self.party_broker = RabbitMQConnection(party_broker, "game.party-queues")
 
-    @coroutine
-    def started(self, application):
-        yield super(PartyModel, self).started(application)
-        yield self.party_broker.wait_connect()
+    async def started(self, application):
+        await super(PartyModel, self).started(application)
+        await self.party_broker.wait_connect()
 
     def get_setup_db(self):
         return self.db
@@ -870,28 +851,27 @@ class PartyModel(Model):
     def get_setup_tables(self):
         return ["parties", "party_members"]
 
-    @coroutine
     @validate(gamespace_id="int", game_name="str_name", game_version="str_name", game_server_name="str_name",
               region_id="int", party_settings="json_dict", room_settings="json_dict", room_filters="json_dict",
               max_members="int", account_id="int", member_role="json_dict", member_token="str", auto_join="bool",
               party_flags=PartyFlags, close_callback="str_name")
-    def create_party(self, gamespace_id, game_name, game_version, game_server_name, region_id, party_settings,
-                     room_settings, max_members, account_id, member_profile, member_token, party_flags,
-                     room_filters=None, auto_join=True, close_callback=None, session_callback=None):
+    async def create_party(self, gamespace_id, game_name, game_version, game_server_name, region_id, party_settings,
+                           room_settings, max_members, account_id, member_profile, member_token, party_flags,
+                           room_filters=None, auto_join=True, close_callback=None, session_callback=None):
 
         if max_members < 2:
             raise PartyError(400, "'max_members' cannot be lass than 2")
 
         try:
-            gs = yield self.gameservers.find_game_server(gamespace_id, game_name, game_server_name)
+            gs = await self.gameservers.find_game_server(gamespace_id, game_name, game_server_name)
         except GameServerNotFound:
             raise PartyError(400, "No such game server")
 
         members_count = 1 if auto_join else 0
 
-        with (yield self.db.acquire(auto_commit=True)) as db:
+        async with self.db.acquire(auto_commit=True) as db:
             try:
-                party_id = yield db.insert(
+                party_id = await db.insert(
                     """
                     INSERT INTO `parties` 
                     (`gamespace_id`, `party_num_members`, `party_max_members`, `game_name`, `game_version`, 
@@ -900,7 +880,8 @@ class PartyModel(Model):
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                     """, gamespace_id, members_count, max_members, game_name, game_version,
                     gs.game_server_id, region_id, ujson.dumps(party_settings), ujson.dumps(room_settings),
-                    ujson.dumps(room_filters) if room_filters is not None else None, PartyStatus.CREATED, party_flags.dump(),
+                    ujson.dumps(room_filters) if room_filters is not None else None, PartyStatus.CREATED,
+                    party_flags.dump(),
                     close_callback)
             except DatabaseError as e:
                 raise PartyError(500, "Failed to create new party: " + e.args[1])
@@ -931,7 +912,7 @@ class PartyModel(Model):
 
             if auto_join:
                 try:
-                    yield db.insert(
+                    await db.insert(
                         """
                         INSERT INTO `party_members`
                         (`account_id`, `gamespace_id`, `party_id`, `member_role`, `member_profile`, `member_token`) 
@@ -942,7 +923,7 @@ class PartyModel(Model):
 
                     # noinspection PyBroadException
                     try:
-                        yield db.execute(
+                        await db.execute(
                             """
                             DELETE FROM `parties`
                             WHERE `gamespace_id`=%s AND `party_id`=%s
@@ -962,34 +943,33 @@ class PartyModel(Model):
                     "member_profile": member_profile
                 }))
 
-            yield session.init(members=members)
+            await session.init(members=members)
 
             if session_callback:
-                yield session_callback(session)
+                await session_callback(session)
 
-            yield session.start_game_if_needed()
+            await session.start_game_if_needed()
 
-            raise Return(session)
+            return session
 
-    @coroutine
     @validate(gamespace_id="int", game_name="str_name", game_version="str_name", game_server_name="str_name",
               region_id="int", party_settings="json_dict", room_settings="json_dict", max_members="int",
               party_flags=PartyFlags, auto_close="bool", close_callback="str_name")
-    def create_empty_party(self, gamespace_id, game_name, game_version, game_server_name, region_id,
-                           party_settings, room_settings, max_members,
-                           party_flags, close_callback=None):
+    async def create_empty_party(self, gamespace_id, game_name, game_version, game_server_name, region_id,
+                                 party_settings, room_settings, max_members,
+                                 party_flags, close_callback=None):
 
         if max_members < 2:
             raise PartyError(400, "'max_members' cannot be lass than 2")
 
         try:
-            gs = yield self.gameservers.find_game_server(gamespace_id, game_name, game_server_name)
+            gs = await self.gameservers.find_game_server(gamespace_id, game_name, game_server_name)
         except GameServerNotFound:
             raise PartyError(400, "No such game server")
 
-        with (yield self.db.acquire(auto_commit=True)) as db:
+        async with self.db.acquire(auto_commit=True) as db:
             try:
-                party_id = yield db.insert(
+                party_id = await db.insert(
                     """
                     INSERT INTO `parties` 
                     (`gamespace_id`, `party_num_members`, `party_max_members`, `game_name`, `game_version`, 
@@ -1016,12 +996,11 @@ class PartyModel(Model):
                 "region_id": region_id
             })
 
-            raise Return(party)
+            return party
 
-    @coroutine
-    def list_party_members(self, gamespace_id, party_id, db=None):
+    async def list_party_members(self, gamespace_id, party_id, db=None):
         try:
-            hosts = yield (db or self.db).query(
+            hosts = await (db or self.db).query(
                 """
                 SELECT *
                 FROM `party_members`
@@ -1030,15 +1009,14 @@ class PartyModel(Model):
         except DatabaseError as e:
             raise PartyError(500, "Failed to list party members: " + e.args[1])
 
-        raise Return(map(PartyMemberAdapter, hosts))
+        return map(PartyMemberAdapter, hosts)
 
-    @coroutine
-    def close_party(self, gamespace_id, party_id, message, reason="close"):
+    async def close_party(self, gamespace_id, party_id, message, reason="close"):
 
-        with (yield self.db.acquire(auto_commit=False)) as db:
+        async with self.db.acquire(auto_commit=False) as db:
             try:
 
-                party_data = yield db.get(
+                party_data = await db.get(
                     """
                     SELECT *
                     FROM `parties`
@@ -1053,35 +1031,34 @@ class PartyModel(Model):
                 party = PartyAdapter(party_data)
 
                 if party.party_num_members:
-                    yield PartySession.drop_message(
+                    await PartySession.drop_message(
                         gamespace_id, party_id, self.party_broker,
                         PartySession.MESSAGE_TYPE_PARTY_CLOSED, message,
                         routing_key='all.' + str(gamespace_id))
 
-                yield self.delete_party(gamespace_id, party_id, db=db)
+                await self.delete_party(gamespace_id, party_id, db=db)
 
                 if party.close_callback:
                     try:
-                        result = yield self.__party_close_callback__(
-                            gamespace_id, party.game_name, party.game_version, party.close_callback,
+                        result = await self.__party_close_callback__(
+                            gamespace_id, party.close_callback,
                             party=party.dump(), message=message, reason=reason)
                     except PartyError:
                         logging.exception("Failed to call close_callback: {0}".format(party.close_callback))
                     else:
-                        raise Return(result)
+                        return result
 
             finally:
-                yield db.commit()
+                await db.commit()
 
-    @coroutine
-    def delete_party(self, gamespace_id, party_id, db=None):
+    async def delete_party(self, gamespace_id, party_id, db=None):
         try:
-            yield (db or self.db).execute(
+            await (db or self.db).execute(
                 """
                 DELETE FROM `party_members`
                 WHERE `gamespace_id`=%s AND `party_id`=%s;
                 """, gamespace_id, party_id)
-            yield (db or self.db).execute(
+            await (db or self.db).execute(
                 """
                 DELETE FROM `parties`
                 WHERE `gamespace_id`=%s AND `party_id`=%s
@@ -1090,13 +1067,12 @@ class PartyModel(Model):
         except DatabaseError as e:
             raise PartyError(500, "Failed to delete a party: " + e.args[1])
 
-    @coroutine
-    def __remove_party_member__(self, gamespace_id, party_id, account_id, add_member=True):
+    async def __remove_party_member__(self, gamespace_id, party_id, account_id, add_member=True):
 
-        with (yield self.db.acquire(auto_commit=False)) as db:
+        async with self.db.acquire(auto_commit=False) as db:
             try:
                 try:
-                    deleted = yield db.execute(
+                    deleted = await db.execute(
                         """
                         DELETE FROM `party_members`
                         WHERE `gamespace_id`=%s AND `account_id`=%s AND `party_id`=%s;
@@ -1107,7 +1083,7 @@ class PartyModel(Model):
                 if not deleted:
                     raise PartyError(409, "No such player to leave a party")
 
-                party_data = yield db.get(
+                party_data = await db.get(
                     """
                     SELECT *
                     FROM `parties`
@@ -1128,20 +1104,20 @@ class PartyModel(Model):
                     party.party_num_members -= 1
 
                     if (PartyFlags.AUTO_CLOSE in party.flags) and (party.party_num_members == 0):
-                        yield self.delete_party(gamespace_id, party_id, db=db)
+                        await self.delete_party(gamespace_id, party_id, db=db)
 
                         if party.close_callback:
                             try:
-                                result = yield self.__party_close_callback__(
-                                    gamespace_id, party.game_name, party.game_version, party.close_callback,
+                                result = await self.__party_close_callback__(
+                                    gamespace_id, party.close_callback,
                                     party=party.dump(), reason="leave")
                             except PartyError:
                                 logging.exception("Failed to call close_callback: {0}".format(party.close_callback))
                             else:
-                                raise Return(result)
+                                return result
                     else:
                         try:
-                            yield db.execute(
+                            await db.execute(
                                 """
                                 UPDATE `parties`
                                 SET `party_num_members`=%s
@@ -1152,35 +1128,34 @@ class PartyModel(Model):
                             raise PartyError(500, "Failed to register a player into a party: " + e.args[1])
 
             finally:
-                yield db.commit()
+                await db.commit()
 
-    @coroutine
     @validate(gamespace_id="int", game_name="str_name", game_version="str_name", game_server_name="str_name",
               region_id="int", party_filter="json_dict", account_id="int",
               member_profile="json_dict", member_token="str",
               auto_create="bool", create_party_settings="json_dict", create_room_settings="json_dict",
               create_room_filters="json_dict", create_max_members="int", create_flags=PartyFlags,
               create_close_callback="str_name")
-    def join_party(self, gamespace_id, game_name, game_version, game_server_name, region_id,
-                   party_filter, account_id, member_profile, member_token,
-                   auto_create, create_party_settings, create_room_settings,
-                   create_max_members, create_flags, create_room_filters=None,
-                   create_close_callback=None, session_callback=None):
+    async def join_party(self, gamespace_id, game_name, game_version, game_server_name, region_id,
+                         party_filter, account_id, member_profile, member_token,
+                         auto_create, create_party_settings, create_room_settings,
+                         create_max_members, create_flags, create_room_filters=None,
+                         create_close_callback=None, session_callback=None):
 
         if create_max_members < 2:
             raise PartyError(400, "'max_members' cannot be lass than 2")
 
         try:
-            game_server_id = yield self.gameservers.find_game_server(gamespace_id, game_name, game_server_name)
+            game_server_id = await self.gameservers.find_game_server(gamespace_id, game_name, game_server_name)
         except GameServerNotFound:
             raise PartyError(400, "No such game server")
 
         try:
             conditions = format_conditions_json('party_settings', party_filter)
         except ConditionError as e:
-            raise RoomError(e.message)
+            raise RoomError(str(e))
 
-        with (yield self.db.acquire(auto_commit=False)) as db:
+        async with self.db.acquire(auto_commit=False) as db:
             try:
                 query = PartyQuery(gamespace_id, game_name, game_version, game_server_id)
 
@@ -1189,18 +1164,18 @@ class PartyModel(Model):
                 query.show_full = False
                 query.region_id = region_id
 
-                party = yield query.query(db, one=True)
+                party = await query.query(db, one=True)
 
                 if party is None:
-                    yield db.commit()
+                    await db.commit()
 
                     if auto_create:
-                        result = yield self.create_party(
+                        result = await self.create_party(
                             gamespace_id, game_name, game_version, game_server_name, region_id,
                             create_party_settings, create_room_settings, create_max_members, account_id,
                             member_profile, member_token, party_flags=create_flags, auto_join=True,
                             close_callback=create_close_callback, room_filters=create_room_filters)
-                        raise Return(result)
+                        return result
                     else:
                         raise NoSuchParty()
 
@@ -1213,7 +1188,7 @@ class PartyModel(Model):
                 party.party_num_members += 1
 
                 try:
-                    yield db.insert(
+                    await db.insert(
                         """
                         INSERT INTO `party_members`
                         (`account_id`, `gamespace_id`, `party_id`, `member_role`, `member_profile`, `member_token`) 
@@ -1222,7 +1197,7 @@ class PartyModel(Model):
                         ujson.dumps(member_profile), member_token)
                 except DatabaseError as e:
                     # well, we've tried
-                    yield db.rollback()
+                    await db.rollback()
                     raise PartyError(500, "Failed to join a party: " + e.args[1])
 
                 role = PartyModel.PARTY_ROLE_USER
@@ -1230,14 +1205,14 @@ class PartyModel(Model):
                 if (PartyFlags.AUTO_START in party.flags) and (party.party_max_members == party.party_num_members):
                     session = PartySession(
                         gamespace_id, account_id, member_profile, role, self.party_broker, party, self.db, self)
-                    yield session.init()
-                    yield session.__start_game__({
+                    await session.init()
+                    await session.__start_game__({
                         "room_settings": party.room_settings
                     }, check_permissions=False)
-                    raise Return(session)
+                    return session
 
                 try:
-                    yield db.execute(
+                    await db.execute(
                         """
                         UPDATE `parties`
                         SET `party_num_members`=%s
@@ -1253,27 +1228,26 @@ class PartyModel(Model):
                     self.db, self, role, member_token)
                 session.joined(member_profile, send_new_player=True)
 
-                yield session.init()
+                await session.init()
 
                 if session_callback:
-                    yield session_callback(session)
+                    await session_callback(session)
 
-                yield session.start_game_if_needed()
-                raise Return(session)
+                await session.start_game_if_needed()
+                return session
 
             finally:
-                yield db.commit()
+                await db.commit()
 
-    @coroutine
     @validate(gamespace_id="int", party_id="int", account_id="int", member_profile="json_dict", member_token="str",
               check_members="json_dict", auto_join="bool")
-    def party_session(self, gamespace_id, party_id, account_id, member_token,
-                      member_profile=None, check_members=None, auto_join=True,
-                      session_callback=None):
+    async def party_session(self, gamespace_id, party_id, account_id, member_token,
+                            member_profile=None, check_members=None, auto_join=True,
+                            session_callback=None):
 
-        with (yield self.db.acquire(auto_commit=False)) as db:
+        async with self.db.acquire(auto_commit=False) as db:
             try:
-                party_data = yield db.get(
+                party_data = await db.get(
                     """
                     SELECT *
                     FROM `parties`
@@ -1293,7 +1267,7 @@ class PartyModel(Model):
                 if party.party_num_members >= party.party_max_members:
                     raise PartyError(406, "Party is full")
 
-                members = yield self.list_party_members(gamespace_id, party_id, db=db)
+                members = await self.list_party_members(gamespace_id, party_id, db=db)
 
                 if check_members:
                     merged_profiles = PredefinedProfile({
@@ -1301,7 +1275,7 @@ class PartyModel(Model):
                     })
 
                     try:
-                        yield merged_profiles.set_data(check_members, None, merge=True)
+                        await merged_profiles.set_data(check_members, None, merge=True)
                     except ProfileError as e:
                         raise PartyError(409, "Member check failed: " + str(e.message))
 
@@ -1314,7 +1288,7 @@ class PartyModel(Model):
                     party.party_num_members += 1
 
                     try:
-                        yield db.insert(
+                        await db.insert(
                             """
                             INSERT INTO `party_members`
                             (`account_id`, `gamespace_id`, `party_id`, `member_role`, 
@@ -1324,13 +1298,13 @@ class PartyModel(Model):
                             ujson.dumps(member_profile), member_token)
                     except DatabaseError as e:
                         # well, we've tried
-                        yield db.rollback()
+                        await db.rollback()
                         raise PartyError(500, "Failed to join a party: " + e.args[1])
 
                     session.joined(member_profile, send_new_player=True)
 
                     try:
-                        yield db.execute(
+                        await db.execute(
                             """
                             UPDATE `parties`
                             SET `party_num_members`=%s
@@ -1340,36 +1314,33 @@ class PartyModel(Model):
                     except DatabaseError as e:
                         raise PartyError(500, "Failed to register a player into a party: " + e.args[1])
 
-                yield db.commit()
+                await db.commit()
 
-                yield session.init(members=members)
+                await session.init(members=members)
 
                 if session_callback:
-                    yield session_callback(session)
+                    await session_callback(session)
 
-                yield session.start_game_if_needed()
-                raise Return(session)
+                await session.start_game_if_needed()
+                return session
 
             finally:
-                yield db.commit()
+                await db.commit()
 
-    @coroutine
-    def __party_close_callback__(self, gamespace_id, game_name, game_version, close_callback,  **args):
+    async def __party_close_callback__(self, gamespace_id, close_callback, **args):
         try:
-            result = yield self.internal.request(
-                "exec", "call_function",
-                application_name=game_name, application_version=game_version, method_name=close_callback,
-                gamespace=gamespace_id, args=args, env={})
+            result = await self.internal.request(
+                "exec", "call_server_function",
+                gamespace=gamespace_id, method_name=close_callback, args=args, env={})
         except InternalError as e:
             raise PartyError(e.code, str(e))
 
-        raise Return(result)
+        return result
 
-    @coroutine
     @validate(gamespace_id="int", party_id="int")
-    def get_party(self, gamespace_id, party_id):
+    async def get_party(self, gamespace_id, party_id):
         try:
-            party = yield self.db.get(
+            party = await self.db.get(
                 """
                 SELECT *
                 FROM `parties`
@@ -1383,4 +1354,4 @@ class PartyModel(Model):
         if party is None:
             raise NoSuchParty()
 
-        raise Return(PartyAdapter(party))
+        return PartyAdapter(party)

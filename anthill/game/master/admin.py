@@ -1,54 +1,52 @@
-import json
 
-from tornado.gen import coroutine, Return, IOLoop
+from tornado.gen import IOLoop
 import tornado.httpclient
 
-import common.admin as a
-from common.environment import EnvironmentClient, AppNotFound
-from common.database import format_conditions_json, ConditionError
-from common.validate import validate
+import anthill.common.admin as a
+from anthill.common.environment import EnvironmentClient, AppNotFound
+from anthill.common.database import format_conditions_json, ConditionError
+from anthill.common.validate import validate
 
-from model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
-from model.host import HostNotFound, HostError, RegionNotFound, RegionError
-from model.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
-from model.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
-from model.ban import NoSuchBan, BanError, UserAlreadyBanned
-from model.room import RoomQuery, RoomNotFound, RoomError
+from . model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
+from . model.host import HostNotFound, HostError, RegionNotFound, RegionError
+from . model.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
+from . model.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
+from . model.ban import NoSuchBan, BanError, UserAlreadyBanned
+from . model.room import RoomQuery, RoomNotFound, RoomError
 
 from tornado.concurrent import run_on_executor
 from concurrent.futures import ThreadPoolExecutor
 
 from geoip import geolite2
+from urllib import parse
 import socket
 import logging
 import os
 import zipfile
 import hashlib
-import urllib
 import datetime
 import math
 import re
+import ujson
 
 
 class ApplicationController(a.AdminController):
-    @coroutine
-    def get(self, record_id):
+    async def get(self, record_id):
 
         environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            app = yield environment_client.get_app_info(record_id)
+            app = await environment_client.get_app_info(record_id)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            servers = yield gameservers.list_game_servers(self.gamespace, record_id)
+            servers = await gameservers.list_game_servers(self.gamespace, record_id)
         except GameError as e:
-            raise a.ActionError("Failed to list game servers: " + e.message)
+            raise a.ActionError("Failed to list game servers: " + str(e))
 
-        app_versions = app.versions.keys()
-        app_versions.sort()
+        app_versions = sorted(app.versions.keys())
 
         result = {
             "app_id": record_id,
@@ -58,7 +56,7 @@ class ApplicationController(a.AdminController):
             "game_servers": servers
         }
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
 
@@ -89,19 +87,18 @@ class ApplicationController(a.AdminController):
 
 
 class GameServerController(a.AdminController):
-    @coroutine
-    def get(self, game_server_id, game_name):
+    async def get(self, game_server_id, game_name):
 
         environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            gs = yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+            gs = await gameservers.get_game_server(self.gamespace, game_name, game_server_id)
         except GameServerNotFound:
             raise a.ActionError("No such game server")
 
@@ -114,7 +111,7 @@ class GameServerController(a.AdminController):
             "schema": gs.schema
         }
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
 
@@ -153,8 +150,7 @@ class GameServerController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def delete(self, **ignored):
+    async def delete(self, **ignored):
 
         game_server_id = self.context.get("game_server_id")
         game_name = self.context.get("game_name")
@@ -163,22 +159,21 @@ class GameServerController(a.AdminController):
         gameservers = self.application.gameservers
 
         try:
-            yield environment_client.get_app_info(game_name)
+            await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            yield gameservers.delete_game_server(self.gamespace, game_name, game_server_id)
+            await gameservers.delete_game_server(self.gamespace, game_name, game_server_id)
         except GameError as e:
-            raise a.ActionError("Failed to delete game server: " + e.message)
+            raise a.ActionError("Failed to delete game server: " + str(e))
 
         raise a.Redirect(
             "app",
             message="Game server has been deleted",
             record_id=game_name)
 
-    @coroutine
-    def update(self, game_server_name, schema, max_players, game_settings, server_settings, **ignored):
+    async def update(self, game_server_name, schema, max_players, game_settings, server_settings, **ignored):
 
         game_server_id = self.context.get("game_server_id")
         game_name = self.context.get("game_name")
@@ -187,27 +182,27 @@ class GameServerController(a.AdminController):
         gameservers = self.application.gameservers
 
         try:
-            game_settings = json.loads(game_settings)
-            server_settings = json.loads(server_settings)
+            game_settings = ujson.loads(game_settings)
+            server_settings = ujson.loads(server_settings)
         except ValueError:
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield environment_client.get_app_info(game_name)
+            await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            schema = json.loads(schema)
+            schema = ujson.loads(schema)
         except ValueError:
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield gameservers.update_game_server(
+            await gameservers.update_game_server(
                 self.gamespace, game_name, game_server_id, game_server_name,
                 schema, max_players, game_settings, server_settings)
         except GameError as e:
-            raise a.ActionError("Failed: " + e.message)
+            raise a.ActionError("Failed: " + str(e))
 
         raise a.Redirect(
             "game_server",
@@ -217,14 +212,13 @@ class GameServerController(a.AdminController):
 
 
 class NewGameServerController(a.AdminController):
-    @coroutine
-    def get(self, game_name, game_server_id=None):
+    async def get(self, game_name, game_server_id=None):
 
         environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -236,7 +230,7 @@ class NewGameServerController(a.AdminController):
 
         if game_server_id:
             try:
-                gs = yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+                gs = await gameservers.get_game_server(self.gamespace, game_name, game_server_id)
             except GameServerNotFound:
                 raise a.ActionError("No such game server to clone from")
 
@@ -248,7 +242,7 @@ class NewGameServerController(a.AdminController):
                 "schema": gs.schema
             })
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
 
@@ -279,8 +273,7 @@ class NewGameServerController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def create(self, game_server_name, schema, max_players, game_settings, **ignored):
+    async def create(self, game_server_name, schema, max_players, game_settings, **ignored):
 
         game_name = self.context.get("game_name")
 
@@ -288,26 +281,26 @@ class NewGameServerController(a.AdminController):
         gameservers = self.application.gameservers
 
         try:
-            game_settings = json.loads(game_settings)
+            game_settings = ujson.loads(game_settings)
         except ValueError:
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield environment_client.get_app_info(game_name)
+            await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            schema = json.loads(schema)
+            schema = ujson.loads(schema)
         except ValueError:
             raise a.ActionError("Corrupted JSON")
 
         try:
-            game_server_id = yield gameservers.create_game_server(
+            game_server_id = await gameservers.create_game_server(
                 self.gamespace, game_name, game_server_name,
                 schema, max_players, game_settings, {})
         except GameError as e:
-            raise a.ActionError("Failed: " + e.message)
+            raise a.ActionError("Failed: " + str(e))
         except GameServerExists:
             raise a.ActionError("Such Game Server already exists")
 
@@ -319,8 +312,7 @@ class NewGameServerController(a.AdminController):
 
 
 class GameServerVersionController(a.AdminController):
-    @coroutine
-    def delete(self, **ignored):
+    async def delete(self, **ignored):
 
         gameservers = self.application.gameservers
 
@@ -329,14 +321,14 @@ class GameServerVersionController(a.AdminController):
         game_server_id = self.context.get("game_server_id")
 
         try:
-            yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+            await gameservers.get_game_server(self.gamespace, game_name, game_server_id)
         except GameServerNotFound:
             raise a.ActionError("No such game server")
 
         try:
-            yield gameservers.delete_game_version(self.gamespace, game_name, game_version, game_server_id)
+            await gameservers.delete_game_version(self.gamespace, game_name, game_version, game_server_id)
         except GameError as e:
-            raise a.ActionError("Failed to delete version config: " + e.message)
+            raise a.ActionError("Failed to delete version config: " + str(e))
 
         raise a.Redirect(
             "app_version",
@@ -344,24 +336,23 @@ class GameServerVersionController(a.AdminController):
             app_id=game_name,
             version_id=game_version)
 
-    @coroutine
-    def get(self, game_name, game_version, game_server_id):
+    async def get(self, game_name, game_version, game_server_id):
 
         environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            gs = yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+            gs = await gameservers.get_game_server(self.gamespace, game_name, game_server_id)
         except GameServerNotFound:
             raise a.ActionError("No such game server")
 
         try:
-            version_settings = yield gameservers.get_version_game_server(
+            version_settings = await gameservers.get_version_game_server(
                 self.gamespace, game_name, game_version, game_server_id)
 
         except GameVersionNotFound:
@@ -374,7 +365,7 @@ class GameServerVersionController(a.AdminController):
             "schema": gs.schema
         }
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
         config = []
@@ -419,8 +410,7 @@ class GameServerVersionController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def update(self, server_settings, **ignored):
+    async def update(self, server_settings, **ignored):
 
         gameservers = self.application.gameservers
 
@@ -429,21 +419,21 @@ class GameServerVersionController(a.AdminController):
         game_server_id = self.context.get("game_server_id")
 
         try:
-            yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+            await gameservers.get_game_server(self.gamespace, game_name, game_server_id)
         except GameServerNotFound:
             raise a.ActionError("No such game server")
 
         try:
-            server_settings = json.loads(server_settings)
+            server_settings = ujson.loads(server_settings)
         except ValueError:
             raise a.ActionError("Corrupted JSON")
 
         try:
-            yield gameservers.set_version_game_server(
+            await gameservers.set_version_game_server(
                 self.gamespace, game_name, game_version, game_server_id, server_settings)
 
         except GameError as e:
-            raise a.ActionError("Failed to update version config: " + e.message)
+            raise a.ActionError("Failed to update version config: " + str(e))
 
         raise a.Redirect(
             "game_server_version",
@@ -456,8 +446,7 @@ class GameServerVersionController(a.AdminController):
 class ApplicationVersionController(a.AdminController):
     DEPLOYMENTS_PER_PAGE = 10
 
-    @coroutine
-    def switch_deployment(self, **ignored):
+    async def switch_deployment(self, **ignored):
         deployments = self.application.deployments
 
         game_name = self.context.get("game_name")
@@ -465,9 +454,9 @@ class ApplicationVersionController(a.AdminController):
         deployment_id = self.context.get("deployment_id")
 
         try:
-            deployment = yield deployments.get_deployment(self.gamespace, deployment_id)
+            deployment = await deployments.get_deployment(self.gamespace, deployment_id)
         except DeploymentError as e:
-            raise a.ActionError("Failed to get game deployment: " + e.message)
+            raise a.ActionError("Failed to get game deployment: " + str(e))
         except DeploymentNotFound as e:
             raise a.ActionError("No such deployment")
 
@@ -475,18 +464,17 @@ class ApplicationVersionController(a.AdminController):
             raise a.ActionError("Deployment is not delivered yet, cannot switch")
 
         try:
-            yield deployments.update_game_version_deployment(
+            await deployments.update_game_version_deployment(
                 self.gamespace, game_name, game_version, deployment_id, True)
         except DeploymentError as e:
-            raise a.ActionError("Failed to set game deployment: " + e.message)
+            raise a.ActionError("Failed to set game deployment: " + str(e))
 
         raise a.Redirect("app_version",
                          message="Deployment has been switched",
                          app_id=game_name,
                          version_id=game_version)
 
-    @coroutine
-    def delete_deployment(self, **ignored):
+    async def delete_deployment(self, **ignored):
         game_name = self.context.get("game_name")
         game_version = self.context.get("game_version")
         deployment_id = self.context.get("deployment_id")
@@ -495,7 +483,7 @@ class ApplicationVersionController(a.AdminController):
         hosts = self.application.hosts
 
         try:
-            deployment = yield deployments.get_deployment(self.gamespace, deployment_id)
+            deployment = await deployments.get_deployment(self.gamespace, deployment_id)
         except DeploymentNotFound:
             raise a.ActionError("No such deployment")
         else:
@@ -507,15 +495,15 @@ class ApplicationVersionController(a.AdminController):
             raise a.ActionError("Cannot delete already deleted deployment or one in progress")
 
         try:
-            hosts_list = yield hosts.list_enabled_hosts()
+            hosts_list = await hosts.list_enabled_hosts()
         except HostError as e:
-            raise a.ActionError("Failed to list hosts: " + e.message)
+            raise a.ActionError("Failed to list hosts: " + str(e))
 
         deliver_list = []
         try:
-            deliveries = yield deployments.list_deployment_deliveries(self.gamespace, deployment_id)
+            deliveries = await deployments.list_deployment_deliveries(self.gamespace, deployment_id)
         except DeploymentDeliveryError as e:
-            raise a.ActionError("Failed to list deliveries: " + e.message)
+            raise a.ActionError("Failed to list deliveries: " + str(e))
         else:
             host_ids = {item.host_id: item for item in hosts_list}
             for delivery in deliveries:
@@ -531,82 +519,79 @@ class ApplicationVersionController(a.AdminController):
             version_id=game_version
         )
 
-    @coroutine
-    def version_disable(self, **ignored):
+    async def version_disable(self, **ignored):
         deployments = self.application.deployments
 
         game_name = self.context.get("app_id")
         game_version = self.context.get("version_id")
 
         try:
-            current_deployment = yield deployments.get_current_deployment(self.gamespace, game_name, game_version)
+            current_deployment = await deployments.get_current_deployment(self.gamespace, game_name, game_version)
         except NoCurrentDeployment as e:
             raise a.ActionError("No current deployment")
 
         try:
-            yield deployments.update_game_version_deployment(
+            await deployments.update_game_version_deployment(
                 self.gamespace, game_name, game_version, current_deployment.deployment_id, False)
         except DeploymentError as e:
-            raise a.ActionError("Failed to set game deployment: " + e.message)
+            raise a.ActionError("Failed to set game deployment: " + str(e))
 
         raise a.Redirect("app_version",
                          message="Game version has been turned off",
                          app_id=game_name,
                          version_id=game_version)
 
-    @coroutine
-    def version_enable(self, **ignored):
+    async def version_enable(self, **ignored):
         deployments = self.application.deployments
 
         game_name = self.context.get("app_id")
         game_version = self.context.get("version_id")
 
         try:
-            current_deployment = yield deployments.get_current_deployment(self.gamespace, game_name, game_version)
+            current_deployment = await deployments.get_current_deployment(self.gamespace, game_name, game_version)
         except NoCurrentDeployment as e:
             raise a.ActionError("No current deployment")
 
         try:
-            yield deployments.update_game_version_deployment(
+            await deployments.update_game_version_deployment(
                 self.gamespace, game_name, game_version, current_deployment.deployment_id, True)
         except DeploymentError as e:
-            raise a.ActionError("Failed to set game deployment: " + e.message)
+            raise a.ActionError("Failed to set game deployment: " + str(e))
 
         raise a.Redirect("app_version",
                          message="Game version has been turned on",
                          app_id=game_name,
                          version_id=game_version)
 
-    @coroutine
-    def get(self, app_id, version_id, page=1):
+    async def get(self, app_id, version_id, page=1):
 
         environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
         deployments = self.application.deployments
 
         try:
-            app = yield environment_client.get_app_info(app_id)
+            app = await environment_client.get_app_info(app_id)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            servers = yield gameservers.list_game_servers(self.gamespace, app_id)
+            servers = await gameservers.list_game_servers(self.gamespace, app_id)
         except GameError as e:
-            raise a.ActionError("Failed to list game servers: " + e.message)
+            raise a.ActionError("Failed to list game servers: " + str(e))
 
         try:
-            game_deployments, pages = yield deployments.list_paged_deployments(
+            game_deployments, pages = await deployments.list_paged_deployments(
                 self.gamespace, app_id, version_id, ApplicationVersionController.DEPLOYMENTS_PER_PAGE, page)
         except DeploymentError as e:
-            raise a.ActionError("Failed to list game deployments: " + e.message)
+            raise a.ActionError("Failed to list game deployments: " + str(e))
 
         try:
-            current_deployment = yield deployments.get_current_deployment(self.gamespace, app_id, version_id)
+            current_deployment = await deployments.get_current_deployment(self.gamespace, app_id, version_id)
         except NoCurrentDeployment:
             current_deployment = None
             deployment_enabled = False
         except DeploymentError as e:
-            raise a.ActionError("Failed to get current deployment: " + e.message)
+            raise a.ActionError("Failed to get current deployment: " + str(e))
         else:
             deployment_enabled = current_deployment.enabled
             current_deployment = current_deployment.deployment_id
@@ -622,7 +607,7 @@ class ApplicationVersionController(a.AdminController):
             "deployment_enabled_title": "Enabled" if deployment_enabled else "Disabled"
         }
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
 
@@ -750,8 +735,7 @@ class Delivery(object):
         self.application = application
         self.gamespace = gamespace
 
-    @coroutine
-    def __deliver_host__(self, game_name, game_version, deployment_id, delivery_id, host, deployment_hash):
+    async def __deliver_host__(self, game_name, game_version, deployment_id, delivery_id, host, deployment_hash):
         client = tornado.httpclient.AsyncHTTPClient()
         deployments = self.application.deployments
         location = deployments.deployments_location
@@ -761,27 +745,26 @@ class Delivery(object):
         try:
             f = open(deployment_path, "r")
         except Exception as e:
-            yield deployments.update_deployment_delivery_status(
+            await deployments.update_deployment_delivery_status(
                 self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR,
                 str(e))
 
             raise DeploymentDeliveryError(str(e))
 
         try:
-            @coroutine
-            def producer(write):
+            async def producer(write):
                 while True:
                     data = f.read(8192)
                     if not data:
                         break
-                    yield write(data)
+                    await write(data)
 
             request = tornado.httpclient.HTTPRequest(
                 url=host.internal_location + "/game/{0}/{1}/deployments/{2}/deliver?{3}".format(
                     game_name,
                     game_version,
                     deployment_id,
-                    urllib.urlencode({
+                    parse.urlencode({
                         "deployment_hash": deployment_hash
                     })),
                 method="PUT",
@@ -789,10 +772,10 @@ class Delivery(object):
                 body_producer=producer
             )
 
-            yield client.fetch(request)
+            await client.fetch(request)
 
         except Exception as e:
-            yield deployments.update_deployment_delivery_status(
+            await deployments.update_deployment_delivery_status(
                 self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR,
                 str(e))
 
@@ -803,11 +786,10 @@ class Delivery(object):
             except Exception:
                 pass
 
-        yield deployments.update_deployment_delivery_status(
+        await deployments.update_deployment_delivery_status(
             self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELIVERED)
 
-    @coroutine
-    def __deliver_upload__(self, game_name, game_version, deployment_id, deliver_list, deployment_hash):
+    async def __deliver_upload__(self, game_name, game_version, deployment_id, deliver_list, deployment_hash):
 
         deployments = self.application.deployments
 
@@ -817,25 +799,24 @@ class Delivery(object):
         ]
 
         try:
-            yield tasks
+            await tasks
         except Exception as e:
             logging.error("Error deliver deployment {0}: {1}".format(
                 deployment_id, str(e)
             ))
-            yield deployments.update_deployment_status(
+            await deployments.update_deployment_status(
                 self.gamespace, deployment_id, DeploymentAdapter.STATUS_ERROR)
-            raise Return(False)
+            return False
         else:
-            yield deployments.update_deployment_status(
+            await deployments.update_deployment_status(
                 self.gamespace, deployment_id, DeploymentAdapter.STATUS_DELIVERED)
-            raise Return(True)
+            return True
 
-    @coroutine
-    def __deliver_clean_host__(self, game_name, game_version, deployment_id, delivery_id, host):
+    async def __deliver_clean_host__(self, game_name, game_version, deployment_id, delivery_id, host):
         client = tornado.httpclient.AsyncHTTPClient()
         deployments = self.application.deployments
 
-        yield deployments.update_deployment_delivery_status(
+        await deployments.update_deployment_delivery_status(
             self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELETING)
 
         try:
@@ -847,29 +828,28 @@ class Delivery(object):
                 method="DELETE",
                 request_timeout=2400
             )
-            yield client.fetch(request)
+            await client.fetch(request)
         except Exception as e:
-            yield deployments.update_deployment_delivery_status(
+            await deployments.update_deployment_delivery_status(
                 self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR, str(e))
             raise DeploymentDeliveryError(str(e))
 
-        yield deployments.update_deployment_delivery_status(
+        await deployments.update_deployment_delivery_status(
             self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELETED)
 
-    @coroutine
-    def __deliver__(self, game_name, game_version, deployment_id, deployment_hash, wait_for_deliver=False):
+    async def __deliver__(self, game_name, game_version, deployment_id, deployment_hash, wait_for_deliver=False):
         hosts = self.application.hosts
         deployments = self.application.deployments
 
         try:
-            hosts_list = yield hosts.list_enabled_hosts()
+            hosts_list = await hosts.list_enabled_hosts()
         except HostError as e:
-            raise a.ActionError("Failed to list hosts: " + e.message)
+            raise a.ActionError("Failed to list hosts: " + str(e))
 
         try:
-            deliveries = yield deployments.list_deployment_deliveries(self.gamespace, deployment_id)
+            deliveries = await deployments.list_deployment_deliveries(self.gamespace, deployment_id)
         except DeploymentDeliveryError as e:
-            raise a.ActionError("Failed to list deliveries: " + e.message)
+            raise a.ActionError("Failed to list deliveries: " + str(e))
 
         deliver_list = []
         delivery_ids = {item.host_id: item for item in deliveries}
@@ -877,7 +857,7 @@ class Delivery(object):
 
         for host in hosts_list:
             if host.host_id not in delivery_ids:
-                new_delivery_id = yield deployments.new_deployment_delivery(
+                new_delivery_id = await deployments.new_deployment_delivery(
                     self.gamespace, deployment_id, host.host_id)
                 deliver_list.append((new_delivery_id, host))
 
@@ -889,39 +869,38 @@ class Delivery(object):
             raise a.ActionError("Nothing to deliver")
 
         try:
-            yield deployments.update_deployment_status(
+            await deployments.update_deployment_status(
                 self.gamespace, deployment_id, DeploymentAdapter.STATUS_DELIVERING)
         except DeploymentError as e:
-            raise a.ActionError("Failed to update deployment status: " + e.message)
+            raise a.ActionError("Failed to update deployment status: " + str(e))
 
         try:
-            yield deployments.update_deployment_deliveries_status(
+            await deployments.update_deployment_deliveries_status(
                 self.gamespace, [
                     delivery_id
                     for delivery_id, host in deliver_list
                 ], DeploymentDeliveryAdapter.STATUS_DELIVERING)
         except DeploymentDeliveryError as e:
-            yield deployments.update_deployment_status(
+            await deployments.update_deployment_status(
                 self.gamespace, deployment_id, DeploymentAdapter.STATUS_ERROR)
-            raise a.ActionError("Failed to update deployment deliveries status: " + e.message)
+            raise a.ActionError("Failed to update deployment deliveries status: " + str(e))
 
         if wait_for_deliver:
-            result = yield self.__deliver_upload__(
+            result = await self.__deliver_upload__(
                 game_name, game_version, deployment_id, deliver_list, deployment_hash)
-            raise Return(result)
+            return result
         else:
             IOLoop.current().spawn_callback(
                 self.__deliver_upload__, game_name, game_version, deployment_id, deliver_list, deployment_hash)
 
-    @coroutine
-    def __clean__(self, deployment, deliver_list=None):
+    async def __clean__(self, deployment, deliver_list=None):
         deployments = self.application.deployments
 
         try:
-            yield deployments.update_deployment_status(
+            await deployments.update_deployment_status(
                 self.gamespace, deployment.deployment_id, DeploymentAdapter.STATUS_DELETING)
         except DeploymentError as e:
-            raise a.ActionError("Failed to update deployment status: " + e.message)
+            raise a.ActionError("Failed to update deployment status: " + str(e))
 
         tasks = [
             self.__deliver_clean_host__(deployment.game_name, deployment.game_version,
@@ -930,42 +909,41 @@ class Delivery(object):
         ]
 
         try:
-            yield tasks
+            await tasks
         except Exception as e:
             logging.exception("Failed to delete deployment {0}".format(deployment.deployment_id))
-            yield deployments.update_deployment_status(
+            await deployments.update_deployment_status(
                 self.gamespace, deployment.deployment_id, DeploymentAdapter.STATUS_ERROR)
-            raise a.ActionError("Failed to delete deployment: " + e.message)
+            raise a.ActionError("Failed to delete deployment: " + str(e))
 
         try:
-            yield deployments.delete_deployment_file(self.gamespace, deployment)
+            await deployments.delete_deployment_file(self.gamespace, deployment)
         except DeploymentError as e:
-            raise a.ActionError("Failed to remove deployment: " + e.message)
+            raise a.ActionError("Failed to remove deployment: " + str(e))
         except DeploymentNotFound:
             raise a.ActionError("No such deployment")
 
         try:
-            yield deployments.update_deployment_status(
+            await deployments.update_deployment_status(
                 self.gamespace, deployment.deployment_id, DeploymentAdapter.STATUS_DELETED)
         except DeploymentError as e:
-            raise a.ActionError("Failed to update deployment status: " + e.message)
+            raise a.ActionError("Failed to update deployment status: " + str(e))
 
 
 class ApplicationDeploymentController(a.AdminController):
-    @coroutine
-    def get(self, game_name, game_version, deployment_id):
+    async def get(self, game_name, game_version, deployment_id):
 
         environment_client = EnvironmentClient(self.application.cache)
         deployments = self.application.deployments
         hosts = self.application.hosts
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            deployment = yield deployments.get_deployment(self.gamespace, deployment_id)
+            deployment = await deployments.get_deployment(self.gamespace, deployment_id)
         except DeploymentNotFound:
             raise a.ActionError("No such deployment")
         else:
@@ -973,14 +951,14 @@ class ApplicationDeploymentController(a.AdminController):
                 raise a.ActionError("Wrong deployment")
 
         try:
-            deliveries = yield deployments.list_deployment_deliveries(self.gamespace, deployment_id)
+            deliveries = await deployments.list_deployment_deliveries(self.gamespace, deployment_id)
         except DeploymentDeliveryError as e:
-            raise a.ActionError("Failed to fetch deliveries: " + e.message)
+            raise a.ActionError("Failed to fetch deliveries: " + str(e))
 
         try:
-            hosts_list = yield hosts.list_hosts()
+            hosts_list = await hosts.list_hosts()
         except HostError as e:
-            raise a.ActionError("Failed to list hosts: " + e.message)
+            raise a.ActionError("Failed to list hosts: " + str(e))
 
         result = {
             "app_name": app.title,
@@ -993,7 +971,7 @@ class ApplicationDeploymentController(a.AdminController):
             }
         }
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
         return [
@@ -1075,8 +1053,7 @@ class ApplicationDeploymentController(a.AdminController):
     def access_scopes(self):
         return ["game_deploy_admin"]
 
-    @coroutine
-    def deliver(self, **ignored):
+    async def deliver(self, **ignored):
 
         environment_client = EnvironmentClient(self.application.cache)
         deployments = self.application.deployments
@@ -1087,12 +1064,12 @@ class ApplicationDeploymentController(a.AdminController):
         deployment_id = self.context.get("deployment_id")
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         try:
-            deployment = yield deployments.get_deployment(self.gamespace, deployment_id)
+            deployment = await deployments.get_deployment(self.gamespace, deployment_id)
         except DeploymentNotFound:
             raise a.ActionError("No such deployment")
         else:
@@ -1103,7 +1080,7 @@ class ApplicationDeploymentController(a.AdminController):
 
         delivery = Delivery(self.application, self.gamespace)
 
-        yield delivery.__deliver__(game_name, game_version, deployment_id, deployment_hash)
+        await delivery.__deliver__(game_name, game_version, deployment_id, deployment_hash)
 
         raise a.Redirect("deployment",
                          message="Deployment process started",
@@ -1123,13 +1100,12 @@ class DeployApplicationController(a.UploadAdminController):
         self.sha256 = None
         self.auto_switch = False
 
-    @coroutine
-    def get(self, game_name, game_version):
+    async def get(self, game_name, game_version):
 
         environment_client = EnvironmentClient(self.application.cache)
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
@@ -1138,10 +1114,9 @@ class DeployApplicationController(a.UploadAdminController):
             "switch_to_new": "true"
         }
 
-        raise a.Return(result)
+        return result
 
-    @coroutine
-    def receive_started(self, filename, args):
+    async def receive_started(self, filename, args):
 
         if not filename.endswith(".zip"):
             raise a.ActionError("The file passed is not a zip file.")
@@ -1157,7 +1132,7 @@ class DeployApplicationController(a.UploadAdminController):
         environment_client = EnvironmentClient(self.application.cache)
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
         else:
@@ -1169,10 +1144,10 @@ class DeployApplicationController(a.UploadAdminController):
             raise a.ActionError("Bad deployment location (server error)")
 
         try:
-            self.deployment = yield deployments.new_deployment(
+            self.deployment = await deployments.new_deployment(
                 self.gamespace, game_name, game_version, "")
         except DeploymentError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         app_location = os.path.join(location, game_name)
 
@@ -1192,8 +1167,7 @@ class DeployApplicationController(a.UploadAdminController):
     def test_zip(self, the_zip_file):
         return the_zip_file.testzip()
 
-    @coroutine
-    def receive_completed(self):
+    async def receive_completed(self):
 
         deployments = self.application.deployments
 
@@ -1202,33 +1176,33 @@ class DeployApplicationController(a.UploadAdminController):
         the_zip_file = zipfile.ZipFile(self.deployment_path)
 
         try:
-            ret = yield self.test_zip(the_zip_file)
+            ret = await self.test_zip(the_zip_file)
         except Exception as e:
             try:
-                yield deployments.update_deployment_status(self.gamespace, self.deployment, "corrupt")
+                await deployments.update_deployment_status(self.gamespace, self.deployment, "corrupt")
             except DeploymentError as e:
-                raise a.ActionError("Corrupted deployment, failed to update: " + e.message)
-            raise a.ActionError("Corrupted deployment: " + e.message)
+                raise a.ActionError("Corrupted deployment, failed to update: " + str(e))
+            raise a.ActionError("Corrupted deployment: " + str(e))
         else:
             if ret:
                 try:
-                    yield deployments.update_deployment_status(self.gamespace, self.deployment, "corrupt")
+                    await deployments.update_deployment_status(self.gamespace, self.deployment, "corrupt")
                 except DeploymentError as e:
-                    raise a.ActionError("Corrupted deployment file, failed to update: " + e.message)
+                    raise a.ActionError("Corrupted deployment file, failed to update: " + str(e))
 
                 raise a.ActionError("Corrupted deployment file: " + str(ret))
 
         deployment_hash = self.sha256.hexdigest()
 
         try:
-            yield deployments.update_deployment_hash(self.gamespace, self.deployment, deployment_hash)
+            await deployments.update_deployment_hash(self.gamespace, self.deployment, deployment_hash)
         except DeploymentError as e:
-            raise a.ActionError("Failed to update hash: " + e.message)
+            raise a.ActionError("Failed to update hash: " + str(e))
 
         try:
-            yield deployments.update_deployment_status(self.gamespace, self.deployment, "uploaded")
+            await deployments.update_deployment_status(self.gamespace, self.deployment, "uploaded")
         except DeploymentError as e:
-            raise a.ActionError("Failed to update deployment status: " + e.message)
+            raise a.ActionError("Failed to update deployment status: " + str(e))
 
         game_name = self.context.get("game_name")
         game_version = self.context.get("game_version")
@@ -1236,7 +1210,7 @@ class DeployApplicationController(a.UploadAdminController):
         delivery = Delivery(self.application, self.gamespace)
 
         if self.auto_switch:
-            result = yield delivery.__deliver__(
+            result = await delivery.__deliver__(
                 game_name, game_version, self.deployment, deployment_hash,
                 wait_for_deliver=True)
 
@@ -1247,10 +1221,10 @@ class DeployApplicationController(a.UploadAdminController):
                     app_id=game_name,
                     version_id=game_version)
 
-            yield deployments.update_game_version_deployment(
+            await deployments.update_game_version_deployment(
                 self.gamespace, game_name, game_version, self.deployment, True)
         else:
-            yield delivery.__deliver__(game_name, game_version, self.deployment, deployment_hash)
+            await delivery.__deliver__(game_name, game_version, self.deployment, deployment_hash)
 
         raise a.Redirect(
             "app_version",
@@ -1295,12 +1269,11 @@ class DebugControllerAction(a.StreamAdminController):
     debug action
     """
 
-    @coroutine
-    def prepared(self, server, **ignored):
+    async def prepared(self, server, **ignored):
         hosts = self.application.hosts
 
         try:
-            host = yield hosts.get_host(server)
+            host = await hosts.get_host(server)
         except HostNotFound as e:
             raise a.ActionError("Server not found: " + str(server))
 
@@ -1308,22 +1281,21 @@ class DebugControllerAction(a.StreamAdminController):
 
 
 class DebugHostController(a.AdminController):
-    @coroutine
-    def get(self, host_id, **ignore):
+    async def get(self, host_id, **ignore):
 
         hosts = self.application.hosts
 
         try:
-            host = yield hosts.get_host(host_id)
+            host = await hosts.get_host(host_id)
         except HostNotFound:
             raise a.ActionError("Server not found")
 
         try:
-            region = yield hosts.get_region(host.region)
+            region = await hosts.get_region(host.region)
         except RegionNotFound:
             raise a.ActionError("Region not found")
         except RegionError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Return({
             "host": host,
@@ -1349,40 +1321,38 @@ class DebugHostController(a.AdminController):
 
 
 class NewHostController(a.AdminController):
-    @coroutine
-    def create(self, name, internal_location):
+    async def create(self, name, internal_location):
         hosts = self.application.hosts
 
         region_id = self.context.get("region_id")
 
         try:
-            yield hosts.get_region(region_id)
+            await hosts.get_region(region_id)
         except RegionNotFound:
             raise a.ActionError("Region not found")
         except RegionError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         try:
-            host_id = yield hosts.new_host(name, internal_location, region_id)
+            host_id = await hosts.new_host(name, internal_location, region_id)
         except HostError as e:
-            raise a.ActionError("Failed to create new host: " + e.message)
+            raise a.ActionError("Failed to create new host: " + str(e))
 
         raise a.Redirect(
             "host",
             message="New host has been created",
             host_id=host_id)
 
-    @coroutine
-    def get(self, region_id):
+    async def get(self, region_id):
 
         hosts = self.application.hosts
 
         try:
-            region = yield hosts.get_region(region_id)
+            region = await hosts.get_region(region_id)
         except RegionNotFound:
             raise a.ActionError("Region not found")
         except RegionError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Return({
             "region": region
@@ -1410,31 +1380,30 @@ class NewHostController(a.AdminController):
 
 
 class RootAdminController(a.AdminController):
-    @coroutine
-    def get(self):
+    async def get(self):
 
         environment_client = EnvironmentClient(self.application.cache)
-        apps = yield environment_client.list_apps()
+        apps = await environment_client.list_apps()
 
         hosts = self.application.hosts
 
         try:
-            regions_list = yield hosts.list_regions()
+            regions_list = await hosts.list_regions()
         except RegionError as e:
-            raise a.ActionError("Failed to fetch regions: " + e.message)
+            raise a.ActionError("Failed to fetch regions: " + str(e))
 
         result = {
             "apps": apps,
             "regions": regions_list
         }
 
-        raise Return(result)
+        return result
 
     def render(self, data):
         return [
             a.links("Applications", links=[
                 a.link("app", app_name, icon="mobile", record_id=app_id)
-                for app_id, app_name in data["apps"].iteritems()
+                for app_id, app_name in data["apps"].items()
             ]),
             a.links("Regions", links=[
                 a.link("region", region.name, icon="globe", region_id=region.region_id)
@@ -1457,38 +1426,36 @@ class RootAdminController(a.AdminController):
 
 
 class HostController(a.AdminController):
-    @coroutine
-    def delete(self, *args, **kwargs):
+    async def delete(self, *args, **kwargs):
         host_id = self.context.get("host_id")
         hosts = self.application.hosts
 
         try:
-            host = yield hosts.get_host(host_id)
+            host = await hosts.get_host(host_id)
         except HostNotFound:
             raise a.ActionError("No such host")
 
-        yield hosts.delete_host(host_id)
+        await hosts.delete_host(host_id)
 
         raise a.Redirect(
             "region",
             message="Host has been deleted",
             region_id=host.region)
 
-    @coroutine
-    def get(self, host_id):
+    async def get(self, host_id):
         hosts = self.application.hosts
 
         try:
-            host = yield hosts.get_host(host_id)
+            host = await hosts.get_host(host_id)
         except HostNotFound:
             raise a.ActionError("No such host")
 
         try:
-            region = yield hosts.get_region(host.region)
+            region = await hosts.get_region(host.region)
         except RegionNotFound:
             raise a.ActionError("Region not found")
         except RegionError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         result = {
             "name": host.name,
@@ -1498,7 +1465,7 @@ class HostController(a.AdminController):
             "host_enabled": "true" if host.enabled else "false"
         }
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
 
@@ -1531,19 +1498,18 @@ class HostController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def update(self, name, internal_location, host_enabled="false"):
+    async def update(self, name, internal_location, host_enabled="false"):
         host_id = self.context.get("host_id")
         hosts = self.application.hosts
 
         try:
-            yield hosts.update_host(
+            await hosts.update_host(
                 host_id,
                 name,
                 internal_location,
                 host_enabled == "true")
         except HostError as e:
-            raise a.ActionError("Failed to update host: " + e.message)
+            raise a.ActionError("Failed to update host: " + str(e))
 
         raise a.Redirect("host",
                          message="Host has been updated",
@@ -1579,34 +1545,31 @@ class FindBanController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def search_account(self, account):
+    async def search_account(self, account):
         bans = self.application.bans
 
         try:
-            ban = yield bans.get_ban_by_account(self.gamespace, account)
+            ban = await bans.get_ban_by_account(self.gamespace, account)
         except NoSuchBan:
             raise a.ActionError("No such ban")
 
         raise a.Redirect("ban", ban_id=ban.ban_id)
 
-    @coroutine
-    def search_ip(self, ip):
+    async def search_ip(self, ip):
         bans = self.application.bans
 
         try:
-            ban_id = yield bans.get_ban_by_ip(self.gamespace, ip)
+            ban_id = await bans.get_ban_by_ip(self.gamespace, ip)
         except NoSuchBan:
             raise a.ActionError("No such ban")
 
         raise a.Redirect("ban", ban_id=ban_id)
 
-    @coroutine
-    def search_id(self, ban_id):
+    async def search_id(self, ban_id):
         bans = self.application.bans
 
         try:
-            yield bans.get_ban(self.gamespace, ban_id)
+            await bans.get_ban(self.gamespace, ban_id)
         except NoSuchBan:
             raise a.ActionError("No such ban")
 
@@ -1614,11 +1577,10 @@ class FindBanController(a.AdminController):
 
 
 class IssueBanController(a.AdminController):
-    @coroutine
-    def get(self):
-        raise Return({
+    async def get(self):
+        return {
             "expires": str(datetime.datetime.now() + datetime.timedelta(days=7))
-        })
+        }
 
     def render(self, data):
         return [
@@ -1645,17 +1607,16 @@ class IssueBanController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def create(self, account_id, expires, reason):
+    async def create(self, account_id, expires, reason):
 
         bans = self.application.bans
 
         try:
-            ban_id = yield bans.new_ban(self.gamespace, account_id, expires, reason)
+            ban_id = await bans.new_ban(self.gamespace, account_id, expires, reason)
         except UserAlreadyBanned:
             raise a.ActionError("User already banned")
         except BanError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Redirect(
             "ban",
@@ -1664,11 +1625,10 @@ class IssueBanController(a.AdminController):
 
 
 class IssueMultipleBansController(a.AdminController):
-    @coroutine
-    def get(self):
-        raise Return({
+    async def get(self):
+        return {
             "expires": str(datetime.datetime.now() + datetime.timedelta(days=7))
-        })
+        }
 
     def render(self, data):
         return [
@@ -1695,8 +1655,7 @@ class IssueMultipleBansController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def create(self, account_ids, expires, reason):
+    async def create(self, account_ids, expires, reason):
 
         bans = self.application.bans
 
@@ -1704,11 +1663,11 @@ class IssueMultipleBansController(a.AdminController):
 
         try:
             for account in accounts:
-                yield bans.new_ban(self.gamespace, account, expires, reason)
+                await bans.new_ban(self.gamespace, account, expires, reason)
         except UserAlreadyBanned:
             raise a.ActionError("User already banned")
         except BanError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Redirect(
             "mass_ban",
@@ -1716,24 +1675,23 @@ class IssueMultipleBansController(a.AdminController):
 
 
 class BanController(a.AdminController):
-    @coroutine
-    def get(self, ban_id):
+    async def get(self, ban_id):
 
         bans = self.application.bans
 
         try:
-            ban = yield bans.get_ban(self.gamespace, ban_id)
+            ban = await bans.get_ban(self.gamespace, ban_id)
         except NoSuchBan:
             raise a.ActionError("No such ban")
         except BanError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
-        raise Return({
+        return {
             "account_id": ban.account,
             "expires": str(ban.expires),
             "ip": ban.ip,
             "reason": ban.reason
-        })
+        }
 
     def render(self, data):
         return [
@@ -1761,34 +1719,32 @@ class BanController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def update(self, expires, reason, **ignored):
+    async def update(self, expires, reason, **ignored):
 
         bans = self.application.bans
 
         ban_id = self.context.get("ban_id")
 
         try:
-            yield bans.update_ban(self.gamespace, ban_id, expires, reason)
+            await bans.update_ban(self.gamespace, ban_id, expires, reason)
         except BanError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Redirect(
             "ban",
             message="Ban has been updated",
             ban_id=ban_id)
 
-    @coroutine
-    def delete(self, **ignored):
+    async def delete(self, **ignored):
 
         bans = self.application.bans
 
         ban_id = self.context.get("ban_id")
 
         try:
-            yield bans.delete_ban(self.gamespace, ban_id)
+            await bans.delete_ban(self.gamespace, ban_id)
         except BanError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Redirect(
             "index",
@@ -1796,32 +1752,30 @@ class BanController(a.AdminController):
 
 
 class RegionController(a.AdminController):
-    @coroutine
-    def delete(self, *args, **kwargs):
+    async def delete(self, *args, **kwargs):
         region_id = self.context.get("region_id")
         hosts = self.application.hosts
 
         try:
-            yield hosts.delete_region(region_id)
+            await hosts.delete_region(region_id)
         except RegionError as e:
-            raise a.ActionError("Failed to delete region: " + e.message)
+            raise a.ActionError("Failed to delete region: " + str(e))
 
         raise a.Redirect(
             "index",
             message="Region has been deleted")
 
-    @coroutine
-    def get(self, region_id):
+    async def get(self, region_id):
         hosts = self.application.hosts
 
         try:
-            region = yield hosts.get_region(region_id)
+            region = await hosts.get_region(region_id)
         except RegionNotFound:
             raise a.ActionError("Region not found")
         except RegionError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
-        hosts_list = yield hosts.list_hosts(region.region_id)
+        hosts_list = await hosts.list_hosts(region.region_id)
 
         result = {
             "name": region.name,
@@ -1831,7 +1785,7 @@ class RegionController(a.AdminController):
             "settings": region.settings
         }
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
         return [
@@ -1908,8 +1862,7 @@ class RegionController(a.AdminController):
     def access_scopes(self):
         return ["game_admin"]
 
-    @coroutine
-    def update_geo(self, external_location):
+    async def update_geo(self, external_location):
 
         region_id = self.context.get("region_id")
 
@@ -1928,28 +1881,27 @@ class RegionController(a.AdminController):
         hosts = self.application.hosts
 
         try:
-            yield hosts.update_region_geo_location(region_id, p_long, p_lat)
+            await hosts.update_region_geo_location(region_id, p_long, p_lat)
         except HostError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Redirect("region",
                          message="Geo location updated",
                          region_id=region_id)
 
-    @coroutine
     @validate(name="str_name", region_default="bool", settings="load_json")
-    def update(self, name, region_default="false", settings="{}"):
+    async def update(self, name, region_default="false", settings="{}"):
         region_id = self.context.get("region_id")
         hosts = self.application.hosts
 
         try:
-            yield hosts.update_region(
+            await hosts.update_region(
                 region_id,
                 name,
                 region_default,
                 settings)
         except RegionError as e:
-            raise a.ActionError("Failed to update region: " + e.message)
+            raise a.ActionError("Failed to update region: " + str(e))
 
         raise a.Redirect("region",
                          message="Region has been updated",
@@ -1957,23 +1909,21 @@ class RegionController(a.AdminController):
 
 
 class NewRegionController(a.AdminController):
-    @coroutine
     @validate(name="str_name", region_default="bool", settings="load_json")
-    def create(self, name, region_default="false", settings="{}"):
+    async def create(self, name, region_default="false", settings="{}"):
         hosts = self.application.hosts
 
         try:
-            region_id = yield hosts.new_region(name, region_default, settings)
+            region_id = await hosts.new_region(name, region_default, settings)
         except RegionError as e:
-            raise a.ActionError("Failed to create new region: " + e.message)
+            raise a.ActionError("Failed to create new region: " + str(e))
 
         raise a.Redirect(
             "region",
             message="New region has been created",
             region_id=region_id)
 
-    @coroutine
-    def get(self):
+    async def get(self):
         raise a.Return({
             "settings": {}
         })
@@ -2001,27 +1951,26 @@ class NewRegionController(a.AdminController):
 
 
 class SpawnRoomController(a.AdminController):
-    @coroutine
-    def get(self, game_name):
+    async def get(self, game_name):
 
         environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
         hosts = self.application.hosts
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         game_versions = {
             v_name: v_name
-            for v_name, v_id in app.versions.iteritems()
+            for v_name, v_id in app.versions.items()
         }
 
         try:
-            game_servers = yield gameservers.list_game_servers(self.gamespace, game_name)
+            game_servers = await gameservers.list_game_servers(self.gamespace, game_name)
         except GameError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         game_servers = {
             game_server.game_server_id: game_server.name
@@ -2029,16 +1978,16 @@ class SpawnRoomController(a.AdminController):
         }
 
         try:
-            game_regions = yield hosts.list_regions()
+            game_regions = await hosts.list_regions()
         except RegionError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         game_regions = {
             region.region_id: region.name
             for region in game_regions
         }
 
-        raise Return({
+        return {
             "game_name": game_name,
             "game_title": app.title,
             "game_versions": game_versions,
@@ -2047,12 +1996,11 @@ class SpawnRoomController(a.AdminController):
             "room_settings": {},
             "custom_settings": {},
             "max_players": 0
-        })
+        }
 
-    @coroutine
     @validate(game_version="str", game_server_id="int", region_id="int", room_settings="load_json_dict",
               max_players="int", custom_settings="load_json_dict")
-    def spawn(self, game_version, game_server_id, region_id, room_settings, custom_settings, max_players=0):
+    async def spawn(self, game_version, game_server_id, region_id, room_settings, custom_settings, max_players=0):
 
         environment_client = EnvironmentClient(self.application.cache)
         hosts = self.application.hosts
@@ -2062,18 +2010,18 @@ class SpawnRoomController(a.AdminController):
         game_name = self.context.get("game_name")
 
         try:
-            yield environment_client.get_app_info(game_name)
+            await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         room_settings = {
             key: value
-            for key, value in room_settings.iteritems()
-            if isinstance(value, (str, unicode, int, float, bool))
+            for key, value in room_settings.items()
+            if isinstance(value, (str, int, float, bool))
         }
 
         try:
-            deployment = yield self.application.deployments.get_current_deployment(
+            deployment = await self.application.deployments.get_current_deployment(
                 self.gamespace, game_name, game_version)
         except NoCurrentDeployment:
             raise a.ActionError("No deployment defined for {0}/{1}".format(
@@ -2086,14 +2034,14 @@ class SpawnRoomController(a.AdminController):
             ))
 
         try:
-            gs = yield gameservers.get_game_server(self.gamespace, game_name, game_server_id)
+            gs = await gameservers.get_game_server(self.gamespace, game_name, game_server_id)
         except GameServerNotFound:
             raise a.ActionError("No such game server")
 
         game_settings = gs.game_settings
 
         try:
-            server_settings = yield gameservers.get_version_game_server(
+            server_settings = await gameservers.get_version_game_server(
                 self.gamespace, game_name, game_version, gs.game_server_id)
         except GameVersionNotFound:
             server_settings = gs.server_settings
@@ -2104,34 +2052,34 @@ class SpawnRoomController(a.AdminController):
         deployment_id = deployment.deployment_id
 
         try:
-            region = yield hosts.get_region(region_id)
+            region = await hosts.get_region(region_id)
         except RegionNotFound:
             raise a.ActionError("Host not found")
 
         try:
-            host = yield hosts.get_best_host(region.region_id)
+            host = await hosts.get_best_host(region.region_id)
         except HostNotFound:
             raise a.ActionError("Not enough hosts")
 
-        room_id = yield rooms.create_room(
+        room_id = await rooms.create_room(
             self.gamespace, game_name, game_version,
             gs, room_settings, host, deployment_id, max_players=max_players)
 
         logging.info("Created a room: '{0}'".format(room_id))
 
         try:
-            result = yield rooms.spawn_server(
+            result = await rooms.spawn_server(
                 self.gamespace, game_name, game_version, gs.name,
                 deployment_id, room_id, host, game_settings, server_settings,
                 room_settings, other_settings=custom_settings)
         except RoomError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         updated_room_settings = result.get("settings")
 
         if updated_room_settings:
             room_settings.update(updated_room_settings)
-            yield rooms.update_room_settings(self.gamespace, room_id, room_settings)
+            await rooms.update_room_settings(self.gamespace, room_id, room_settings)
 
         raise a.Redirect("room", message="Successfully spawned a server", room_id=room_id)
 
@@ -2161,87 +2109,83 @@ class SpawnRoomController(a.AdminController):
 
 
 class RoomController(a.AdminController):
-    @coroutine
-    def get(self, room_id):
+    async def get(self, room_id):
 
         rooms = self.application.rooms
         environment_client = EnvironmentClient(self.application.cache)
 
         try:
-            room = yield rooms.get_room(self.gamespace, room_id)
+            room = await rooms.get_room(self.gamespace, room_id)
         except RoomNotFound:
             raise a.ActionError("No such room")
         except RoomError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         try:
-            app = yield environment_client.get_app_info(room.game_name)
+            app = await environment_client.get_app_info(room.game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
-        raise Return({
+        return {
             "game_name": room.game_name,
             "game_title": app.title
-        })
+        }
 
-    @coroutine
-    def delete(self, **ignored):
+    async def delete(self, **ignored):
         rooms = self.application.rooms
 
         room_id = self.context.get("room_id")
 
         try:
-            room = yield rooms.get_room(self.gamespace, room_id)
+            room = await rooms.get_room(self.gamespace, room_id)
         except RoomNotFound:
             raise a.ActionError("No such room")
         except RoomError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         try:
-            yield rooms.terminate_room(self.gamespace, room_id, room=room)
+            await rooms.terminate_room(self.gamespace, room_id, room=room)
         except RoomError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Redirect(
             "rooms",
             message="Game has been shot down",
             game_name=room.game_name)
 
-    @coroutine
-    def execute_command(self, command, **ignored):
+    async def execute_command(self, command, **ignored):
         rooms = self.application.rooms
 
         room_id = self.context.get("room_id")
 
         try:
-            room = yield rooms.get_room(self.gamespace, room_id)
+            room = await rooms.get_room(self.gamespace, room_id)
         except RoomNotFound:
             raise a.ActionError("No such room")
         except RoomError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         try:
-            yield rooms.execute_stdin_command(self.gamespace, room_id, command, room=room)
+            await rooms.execute_stdin_command(self.gamespace, room_id, command, room=room)
         except RoomError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Redirect(
             "room",
             message="Command has been executed",
             room_id=room_id)
 
-    @coroutine
-    def debug(self, **ignored):
+    async def debug(self, **ignored):
         rooms = self.application.rooms
 
         room_id = self.context.get("room_id")
 
         try:
-            room = yield rooms.get_room(self.gamespace, room_id)
+            room = await rooms.get_room(self.gamespace, room_id)
         except RoomNotFound:
             raise a.ActionError("No such room")
         except RoomError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         raise a.Redirect(
             "debug_host",
@@ -2279,8 +2223,7 @@ class RoomController(a.AdminController):
 class RoomsController(a.AdminController):
     ROOMS_PER_PAGE = 20
 
-    @coroutine
-    def get(self, game_name, page=1,
+    async def get(self, game_name, page=1,
             game_version=None,
             game_server=None,
             game_deployment=None,
@@ -2294,21 +2237,21 @@ class RoomsController(a.AdminController):
         hosts = self.application.hosts
 
         try:
-            app = yield environment_client.get_app_info(game_name)
+            app = await environment_client.get_app_info(game_name)
         except AppNotFound as e:
             raise a.ActionError("App was not found.")
 
         game_versions = {
             v_name: v_name
-            for v_name, v_id in app.versions.iteritems()
+            for v_name, v_id in app.versions.items()
         }
 
         game_versions[""] = "Any"
 
         try:
-            game_servers = yield gameservers.list_game_servers(self.gamespace, game_name)
+            game_servers = await gameservers.list_game_servers(self.gamespace, game_name)
         except GameError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         game_servers = {
             game_server.game_server_id: game_server.name
@@ -2318,9 +2261,9 @@ class RoomsController(a.AdminController):
         game_servers[""] = "Any"
 
         try:
-            game_deployments = yield deployments.list_deployments(self.gamespace, game_name)
+            game_deployments = await deployments.list_deployments(self.gamespace, game_name)
         except DeploymentError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         game_deployments = {
             dep.deployment_id: dep.game_version + " / @" + dep.deployment_id
@@ -2330,9 +2273,9 @@ class RoomsController(a.AdminController):
         game_deployments[""] = "Any"
 
         try:
-            game_regions = yield hosts.list_regions()
+            game_regions = await hosts.list_regions()
         except RegionError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         game_regions = {
             region.region_id: region.name
@@ -2342,9 +2285,9 @@ class RoomsController(a.AdminController):
         game_regions[""] = "Any"
 
         try:
-            game_hosts = yield hosts.list_hosts(game_region)
+            game_hosts = await hosts.list_hosts(game_region)
         except RegionError as e:
-            raise a.ActionError(e.message)
+            raise a.ActionError(str(e))
 
         game_hosts = {
             host.host_id: host.name
@@ -2373,14 +2316,14 @@ class RoomsController(a.AdminController):
 
         if game_settings:
             try:
-                game_settings = json.loads(game_settings)
+                game_settings = ujson.loads(game_settings)
             except (KeyError, ValueError):
                 raise a.ActionError("Corrupted settings")
 
             try:
                 cond = format_conditions_json('settings', game_settings)
             except ConditionError as e:
-                raise a.ActionError(e.message)
+                raise a.ActionError(str(e))
 
             query.add_conditions(cond)
         else:
@@ -2392,7 +2335,7 @@ class RoomsController(a.AdminController):
         if game_host:
             query.host_id = game_host
 
-        rooms, count = yield query.query(self.application.db, one=False, count=True)
+        rooms, count = await query.query(self.application.db, one=False, count=True)
 
         pages = int(math.ceil(float(count) / float(RoomsController.ROOMS_PER_PAGE)))
 
@@ -2423,10 +2366,9 @@ class RoomsController(a.AdminController):
             "total_count": count
         }
 
-        raise a.Return(result)
+        return result
 
-    @coroutine
-    def filter(self, **args):
+    async def filter(self, **args):
 
         game_name = self.context.get("game_name")
         page = self.context.get("page", 1)
@@ -2440,8 +2382,7 @@ class RoomsController(a.AdminController):
 
         raise a.Redirect("rooms", **filters)
 
-    @coroutine
-    def delete_results(self, **args):
+    async def delete_results(self, **args):
 
         rooms = self.application.rooms
 
@@ -2455,7 +2396,7 @@ class RoomsController(a.AdminController):
 
         filters.update(args)
 
-        filter_results = yield self.get(**filters)
+        filter_results = await self.get(**filters)
 
         failed_count = 0
         deleted_count = 0
@@ -2463,7 +2404,7 @@ class RoomsController(a.AdminController):
         for room, game_server, region, host in filter_results["rooms"]:
 
             try:
-                yield rooms.terminate_room(self.gamespace, room.room_id, room=room, host=host)
+                await rooms.terminate_room(self.gamespace, room.room_id, room=room, host=host)
             except RoomError:
                 failed_count += 1
                 logging.exception("Failed to delete room {0}".format(room.room_id))
@@ -2475,8 +2416,7 @@ class RoomsController(a.AdminController):
 
         raise a.Redirect("rooms", message="Successfully deleted {0} rooms".format(deleted_count), **filters)
 
-    @coroutine
-    def execute_command_on_results(self, command, **args):
+    async def execute_command_on_results(self, command, **args):
 
         rooms = self.application.rooms
 
@@ -2490,7 +2430,7 @@ class RoomsController(a.AdminController):
 
         filters.update(args)
 
-        filter_results = yield self.get(**filters)
+        filter_results = await self.get(**filters)
 
         failed_count = 0
         deleted_count = 0
@@ -2498,7 +2438,7 @@ class RoomsController(a.AdminController):
         for room, game_server, region, host in filter_results["rooms"]:
 
             try:
-                yield rooms.execute_stdin_command(self.gamespace, room.room_id, command, room=room, host=host)
+                await rooms.execute_stdin_command(self.gamespace, room.room_id, command, room=room, host=host)
             except RoomError:
                 failed_count += 1
                 logging.exception("Failed to execute on a room {0}".format(room.room_id))
@@ -2619,12 +2559,11 @@ class RoomsController(a.AdminController):
 
 
 class HostsController(a.AdminController):
-    @coroutine
-    def get(self):
+    async def get(self):
         hosts = self.application.hosts
 
-        regions_list = yield hosts.list_regions()
-        hosts_list = yield hosts.list_hosts()
+        regions_list = await hosts.list_regions()
+        hosts_list = await hosts.list_hosts()
 
         result = {
             "hosts": hosts_list,
@@ -2634,7 +2573,7 @@ class HostsController(a.AdminController):
             }
         }
 
-        raise a.Return(result)
+        return result
 
     def render(self, data):
         regions = data["regions"]

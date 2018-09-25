@@ -1,21 +1,18 @@
+from tornado.gen import sleep
+from tornado.ioloop import IOLoop, PeriodicCallback
+
+from anthill.common.model import Model
+from anthill.common.internal import Internal, InternalError
+from anthill.common.discover import DiscoveryError
+from anthill.common.validate import validate
+from anthill.common import random_string, database
+
+from .gameserver import GameServerAdapter
+from .host import RegionAdapter, HostAdapter, HostNotFound
+
 import ujson
 import logging
 import platform
-
-from common.model import Model
-from tornado.gen import coroutine, Return, sleep
-from tornado.ioloop import IOLoop, PeriodicCallback
-
-import common.database
-import common.discover
-
-from common.internal import Internal, InternalError
-from common.discover import DiscoveryError
-from common.validate import validate
-from common import random_string
-
-from gameserver import GameServerAdapter
-from host import RegionAdapter, HostAdapter, HostNotFound
 
 
 class ApproveFailed(Exception):
@@ -182,8 +179,7 @@ class RoomQuery(object):
 
         return conditions, data
 
-    @coroutine
-    def query(self, db, one=False, count=False):
+    async def query(self, db, one=False, count=False):
         conditions, data = self.__values__()
 
         query = """
@@ -228,19 +224,19 @@ class RoomQuery(object):
         query += ";"
 
         if one:
-            result = yield db.get(query, *data)
+            result = await db.get(query, *data)
 
             if not result:
-                raise Return(None)
+                return None
 
-            raise Return(RoomAdapter(result))
+            return RoomAdapter(result)
         else:
-            result = yield db.query(query, *data)
+            result = await db.query(query, *data)
 
             count_result = 0
 
             if count:
-                count_result = yield db.get(
+                count_result = await db.get(
                     """
                         SELECT FOUND_ROWS() AS count;
                     """)
@@ -261,9 +257,9 @@ class RoomQuery(object):
                 items = zip(items, *adapters)
 
             if count:
-                raise Return((items, count_result))
+                return (items, count_result)
 
-            raise Return(items)
+            return items
 
 
 class RoomsModel(Model):
@@ -273,9 +269,8 @@ class RoomsModel(Model):
     def __generate_key__(gamespace_id, account_id):
         return str(gamespace_id) + "_" + str(account_id) + "_" + random_string(32)
 
-    @coroutine
-    def __inc_players_num__(self, gamespace_id, room_id, db, amount=1):
-        yield db.execute(
+    async def __inc_players_num__(self, gamespace_id, room_id, db, amount=1):
+        await db.execute(
             """
             UPDATE `rooms` r
             SET `players`=`players` + %s
@@ -304,10 +299,9 @@ class RoomsModel(Model):
         else:
             self.monitoring_report_callback = None
 
-    @coroutine
-    def __update_monitoring_status__(self):
-        players_count = yield self.get_players_count()
-        players_count_per_host = yield self.list_players_count_per_host()
+    async def __update_monitoring_status__(self):
+        players_count = await self.get_players_count()
+        players_count_per_host = await self.list_players_count_per_host()
 
         self.app.monitor_action(
             "players",
@@ -325,37 +319,33 @@ class RoomsModel(Model):
                 host_name=host.host_name,
                 host_id=host.host_id)
 
-    @coroutine
-    def started(self, application):
-        yield super(RoomsModel, self).started(application)
+    async def started(self, application):
+        await super(RoomsModel, self).started(application)
         if self.monitoring_report_callback:
             self.monitoring_report_callback.start()
-            yield self.__update_monitoring_status__()
+            await self.__update_monitoring_status__()
 
-    @coroutine
-    def stopped(self):
+    async def stopped(self):
         if self.monitoring_report_callback:
             self.monitoring_report_callback.stop()
-        yield super(RoomsModel, self).stopped()
+        await super(RoomsModel, self).stopped()
 
-    @coroutine
-    def get_players_count(self):
+    async def get_players_count(self):
         try:
-            count = yield self.db.get(
+            count = await self.db.get(
                 """
                 SELECT COUNT(*) AS `count` FROM `players`
                 WHERE `state`='JOINED'
                 """
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to get players count: " + e.args[1])
 
-        raise Return(count["count"])
+        return count["count"]
 
-    @coroutine
-    def list_players_count_per_host(self):
+    async def list_players_count_per_host(self):
         try:
-            counts = yield self.db.query(
+            counts = await self.db.query(
                 """
                 SELECT COUNT(`players`.`account_id`) AS `players_count`, `hosts`.*
                 FROM `players`, `hosts`
@@ -363,15 +353,14 @@ class RoomsModel(Model):
                 GROUP BY `players`.`host_id`;
                 """
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to get players count: " + e.args[1])
 
-        raise Return(map(HostsPlayersCountAdapter, counts))
+        return map(HostsPlayersCountAdapter, counts)
 
-    @coroutine
-    def list_player_records(self, gamespace, account_id):
+    async def list_player_records(self, gamespace, account_id):
         try:
-            player_records = yield self.db.query(
+            player_records = await self.db.query(
                 """
                 SELECT `players`.`room_id`, 
                        `rooms`.`game_name`, 
@@ -386,20 +375,19 @@ class RoomsModel(Model):
                     `game_servers`.`game_server_id`=`rooms`.`game_server_id`;
                 """, gamespace, account_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to get players count: " + e.args[1])
         else:
-            raise Return(map(PlayerRecordAdapter, player_records))
+            return map(PlayerRecordAdapter, player_records)
 
-    @coroutine
     @validate(gamespace="int", account_ids="json_list_of_ints")
-    def list_players_records(self, gamespace, account_ids):
+    async def list_players_records(self, gamespace, account_ids):
 
         if not account_ids:
-            raise Return({})
+            return {}
 
         try:
-            player_records = yield self.db.query(
+            player_records = await self.db.query(
                 """
                 SELECT `players`.`account_id`,
                        `players`.`room_id`, 
@@ -415,7 +403,7 @@ class RoomsModel(Model):
                     `game_servers`.`game_server_id`=`rooms`.`game_server_id`;
                 """, gamespace, account_ids
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to get players count: " + e.args[1])
         else:
 
@@ -427,12 +415,11 @@ class RoomsModel(Model):
             for record in player_records:
                 result[record["account_id"]].append(PlayerRecordAdapter(record))
 
-            raise Return(result)
+            return result
 
-    @coroutine
-    def __insert_player__(self, gamespace, account_id, room_id, host_id,
-                          key, access_token, info, db, trigger_remove=True):
-        record_id = yield db.insert(
+    async def __insert_player__(self, gamespace, account_id, room_id, host_id,
+                                key, access_token, info, db, trigger_remove=True):
+        record_id = await db.insert(
             """
             INSERT INTO `players`
             (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`, `info`)
@@ -443,7 +430,7 @@ class RoomsModel(Model):
         if trigger_remove:
             self.trigger_remove_temp_reservation(record_id)
 
-        raise Return(record_id)
+        return record_id
 
     def trigger_remove_temp_reservation_multi(self, gamespace, room_id, accounts):
         IOLoop.current().spawn_callback(self.__remove_temp_reservation_multi__, gamespace, room_id, accounts)
@@ -451,9 +438,8 @@ class RoomsModel(Model):
     def trigger_remove_temp_reservation(self, record):
         IOLoop.current().spawn_callback(self.__remove_temp_reservation__, record)
 
-    @coroutine
-    def __update_players_num__(self, room_id, db):
-        yield db.execute(
+    async def __update_players_num__(self, room_id, db):
+        await db.execute(
             """
             UPDATE `rooms` r
             SET `players`=(SELECT COUNT(*) FROM `players` p WHERE p.room_id = r.room_id)
@@ -461,8 +447,7 @@ class RoomsModel(Model):
             """, room_id
         )
 
-    @coroutine
-    def __remove_temp_reservation__(self, record_id):
+    async def __remove_temp_reservation__(self, record_id):
         """
         Called asynchronously when user joined the room
         Waits a while, and then leaves the room, if the join reservation
@@ -470,17 +455,16 @@ class RoomsModel(Model):
         """
 
         # wait a while
-        yield sleep(RoomsModel.AUTO_REMOVE_TIME)
+        await sleep(RoomsModel.AUTO_REMOVE_TIME)
 
-        result = yield self.leave_room_reservation(record_id)
+        result = await self.leave_room_reservation(record_id)
 
         if result:
             logging.warning("Removed player reservation: {0}".format(
                 record_id
             ))
 
-    @coroutine
-    def __remove_temp_reservation_multi__(self, gamespace, room_id, accounts):
+    async def __remove_temp_reservation_multi__(self, gamespace, room_id, accounts):
         """
         Called asynchronously when users joined the room
         Waits a while, and then leaves the room, if the join reservation
@@ -488,15 +472,14 @@ class RoomsModel(Model):
         """
 
         # wait a while
-        yield sleep(RoomsModel.AUTO_REMOVE_TIME)
-        yield self.leave_room_reservation_multi(gamespace, room_id, accounts)
+        await sleep(RoomsModel.AUTO_REMOVE_TIME)
+        await self.leave_room_reservation_multi(gamespace, room_id, accounts)
 
-    @coroutine
-    def approve_join(self, gamespace, room_id, key):
+    async def approve_join(self, gamespace, room_id, key):
 
-        with (yield self.db.acquire(auto_commit=False)) as db:
+        async with self.db.acquire(auto_commit=False) as db:
             try:
-                select = yield db.get(
+                select = await db.get(
                     """
                     SELECT `access_token`, `info`, `record_id`
                     FROM `players`
@@ -505,7 +488,7 @@ class RoomsModel(Model):
                     FOR UPDATE;
                     """, gamespace, room_id, key
                 )
-            except common.database.DatabaseError as e:
+            except database.DatabaseError as e:
                 raise RoomError("Failed to approve a join: " + e.args[1])
             else:
                 if select is None:
@@ -516,7 +499,7 @@ class RoomsModel(Model):
                 info = select["info"]
 
                 try:
-                    yield db.execute(
+                    await db.execute(
                         """
                         UPDATE `players`
                         SET `state`='JOINED'
@@ -524,48 +507,45 @@ class RoomsModel(Model):
                         LIMIT 1;
                         """, gamespace, record_id
                     )
-                except common.database.DatabaseError as e:
+                except database.DatabaseError as e:
                     raise RoomError("Failed to approve a join: " + e.args[1])
 
-                raise Return((access_token, info))
+                return (access_token, info)
             finally:
-                yield db.commit()
+                await db.commit()
 
-    @coroutine
-    def approve_leave(self, gamespace, room_id, key):
+    async def approve_leave(self, gamespace, room_id, key):
         try:
-            with (yield self.db.acquire()) as db:
-                yield db.execute(
+            async with self.db.acquire() as db:
+                await db.execute(
                     """
                     DELETE FROM `players`
                     WHERE `gamespace_id`=%s AND `key`=%s AND `room_id`=%s;
                     """, gamespace, key, room_id
                 )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             # well, a dead lock is possible here, so ignore it as it happens
             pass
 
-    @coroutine
-    def assign_location(self, gamespace, room_id, location):
+    async def assign_location(self, gamespace, room_id, location):
 
         if not isinstance(location, dict):
             raise RoomError("Location should be a dict")
 
         try:
-            yield self.db.execute(
+            await self.db.execute(
                 """
                 UPDATE `rooms`
                 SET `location`=%s, `state`='SPAWNED'
                 WHERE `gamespace_id`=%s AND `room_id`=%s
                 """, ujson.dumps(location), gamespace, room_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to create room: " + e.args[1])
         else:
-            raise Return(room_id)
+            return room_id
 
-    @coroutine
-    def create_and_join_room(
+    async def create_and_join_room(
             self, gamespace, game_name, game_version, gs, room_settings,
             account_id, access_token, player_info, host, deployment_id, trigger_remove=True):
 
@@ -574,7 +554,7 @@ class RoomsModel(Model):
         key = RoomsModel.__generate_key__(gamespace, account_id)
 
         try:
-            room_id = yield self.db.insert(
+            room_id = await self.db.insert(
                 """
                 INSERT INTO `rooms`
                 (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
@@ -584,21 +564,21 @@ class RoomsModel(Model):
                 "{}", ujson.dumps(room_settings), host.host_id, host.region, deployment_id
             )
 
-            record_id = yield self.__insert_player__(
+            record_id = await self.__insert_player__(
                 gamespace, account_id, room_id, host.host_id, key, access_token, player_info, self.db, trigger_remove)
 
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to create a room: " + e.args[1])
         else:
-            raise Return((record_id, key, room_id))
+            return (record_id, key, room_id)
 
-    @coroutine
-    def create_room(self, gamespace, game_name, game_version, gs, room_settings, host, deployment_id, max_players=0):
+    async def create_room(self, gamespace, game_name, game_version, gs, room_settings, host, deployment_id,
+                          max_players=0):
 
         max_players = max_players or gs.max_players
 
         try:
-            room_id = yield self.db.insert(
+            room_id = await self.db.insert(
                 """
                 INSERT INTO `rooms`
                 (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
@@ -608,22 +588,21 @@ class RoomsModel(Model):
                 "{}", ujson.dumps(room_settings), host.host_id, host.region, deployment_id
             )
 
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to create a room: " + e.args[1])
         else:
-            raise Return(room_id)
+            return room_id
 
-    @coroutine
-    def create_and_join_room_multi(
+    async def create_and_join_room_multi(
             self, gamespace, game_name, game_version, gs, room_settings,
             members, host, deployment_id, trigger_remove=True):
 
         max_players = gs.max_players
 
         try:
-            with (yield self.db.acquire()) as db:
+            async with self.db.acquire() as db:
 
-                room_id = yield db.insert(
+                room_id = await db.insert(
                     """
                     INSERT INTO `rooms`
                     (`gamespace_id`, `game_name`, `game_version`, `game_server_id`, `players`,
@@ -649,9 +628,9 @@ class RoomsModel(Model):
                     VALUES {0};
                     """.format(",".join(scheme))
 
-                first_record_id = yield db.insert(query_string, *data)
+                first_record_id = await db.insert(query_string, *data)
 
-                yield db.commit()
+                await db.commit()
 
                 result = {
                     token.account: (record_id, keys[token.account])
@@ -662,13 +641,12 @@ class RoomsModel(Model):
                     accounts = [token.account for token, info in members]
                     self.trigger_remove_temp_reservation_multi(gamespace, room_id, accounts)
 
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to create a room: " + e.args[1])
         else:
-            raise Return((result, room_id))
+            return (result, room_id)
 
-    @coroutine
-    def find_and_join_room_multi(
+    async def find_and_join_room_multi(
             self, gamespace, game_name, game_version, game_server_id,
             members, filters, regions_order=None, region=None):
 
@@ -688,12 +666,12 @@ class RoomsModel(Model):
         :returns a pair records (see __join_room_multi__) and room info
         """
         try:
-            conditions = common.database.format_conditions_json('settings', filters)
-        except common.database.ConditionError as e:
-            raise RoomError(e.message)
+            conditions = database.format_conditions_json('settings', filters)
+        except database.ConditionError as e:
+            raise RoomError(str(e))
 
         try:
-            with (yield self.db.acquire(auto_commit=False)) as db:
+            async with self.db.acquire(auto_commit=False) as db:
 
                 query = RoomQuery(gamespace, game_name, game_version, game_server_id)
 
@@ -708,27 +686,26 @@ class RoomsModel(Model):
 
                 query.host_active = True
 
-                room = yield query.query(db, one=True)
+                room = await query.query(db, one=True)
 
                 if room is None:
-                    yield db.commit()
+                    await db.commit()
                     raise RoomNotFound()
 
                 room_id = room.room_id
 
                 # at last, join into the player list
-                records = yield self.__join_room_multi__(
+                records = await self.__join_room_multi__(
                     gamespace, room_id, room.host_id, members, db)
 
-                raise Return((records, room))
+                return (records, room)
 
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
 
-    @coroutine
-    def find_and_join_room(self, gamespace, game_name, game_version, game_server_id,
-                           account_id, access_token, player_info, settings,
-                           regions_order=None, region=None):
+    async def find_and_join_room(self, gamespace, game_name, game_version, game_server_id,
+                                 account_id, access_token, player_info, settings,
+                                 regions_order=None, region=None):
 
         """
         Find the room and join into it, if any
@@ -746,12 +723,12 @@ class RoomsModel(Model):
         :returns a pair of record_id, a key (an unique string to find the record by) for the player and room info
         """
         try:
-            conditions = common.database.format_conditions_json('settings', settings)
-        except common.database.ConditionError as e:
-            raise RoomError(e.message)
+            conditions = database.format_conditions_json('settings', settings)
+        except database.ConditionError as e:
+            raise RoomError(str(e))
 
         try:
-            with (yield self.db.acquire(auto_commit=False)) as db:
+            async with self.db.acquire(auto_commit=False) as db:
 
                 query = RoomQuery(gamespace, game_name, game_version, game_server_id)
 
@@ -765,24 +742,23 @@ class RoomsModel(Model):
 
                 query.host_active = True
 
-                room = yield query.query(db, one=True)
+                room = await query.query(db, one=True)
 
                 if room is None:
-                    yield db.commit()
+                    await db.commit()
                     raise RoomNotFound()
 
                 room_id = room.room_id
 
                 # at last, join into the player list
-                record_id, key = yield self.__join_room__(
+                record_id, key = await self.__join_room__(
                     gamespace, room_id, room.host_id, account_id, access_token, player_info, db)
-                raise Return((record_id, key, room))
+                return (record_id, key, room)
 
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
 
-    @coroutine
-    def join_room(self, gamespace, game_name, room_id, account_id, access_token, player_info):
+    async def join_room(self, gamespace, game_name, room_id, account_id, access_token, player_info):
 
         """
         Find the room and join into it, if any
@@ -796,7 +772,7 @@ class RoomsModel(Model):
         """
 
         try:
-            with (yield self.db.acquire(auto_commit=False)) as db:
+            async with self.db.acquire(auto_commit=False) as db:
 
                 query = RoomQuery(gamespace, game_name)
 
@@ -804,30 +780,29 @@ class RoomsModel(Model):
                 query.for_update = True
                 query.show_full = False
 
-                room = yield query.query(db, one=True)
+                room = await query.query(db, one=True)
 
                 if room is None:
-                    yield db.commit()
+                    await db.commit()
                     raise RoomNotFound()
 
                 room_id = room.room_id
 
                 # at last, join into the player list
-                record_id, key = yield self.__join_room__(
+                record_id, key = await self.__join_room__(
                     gamespace, room_id, room.host_id, account_id, access_token, player_info, db)
 
-                raise Return((record_id, key, room))
+                return (record_id, key, room)
 
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
 
-    @coroutine
-    def find_room(self, gamespace, game_name, game_version, game_server_id, settings, regions_order=None):
+    async def find_room(self, gamespace, game_name, game_version, game_server_id, settings, regions_order=None):
 
         try:
-            conditions = common.database.format_conditions_json('settings', settings)
-        except common.database.ConditionError as e:
-            raise RoomError(e.message)
+            conditions = database.format_conditions_json('settings', settings)
+        except database.ConditionError as e:
+            raise RoomError(str(e))
 
         try:
 
@@ -838,34 +813,32 @@ class RoomsModel(Model):
             query.state = 'SPAWNED'
             query.limit = 1
 
-            room = yield query.query(self.db, one=True)
-        except common.database.DatabaseError as e:
+            room = await query.query(self.db, one=True)
+        except database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
 
         if room is None:
             raise RoomNotFound()
 
-        raise Return(room)
+        return room
 
-    @coroutine
-    def update_room_settings(self, gamespace, room_id, room_settings):
+    async def update_room_settings(self, gamespace, room_id, room_settings):
 
         if not isinstance(room_settings, dict):
             raise RoomError("Room settings is not a dict")
 
         try:
-            yield self.db.execute(
+            await self.db.execute(
                 """
                 UPDATE `rooms`
                 SET `settings`=%s
                 WHERE `gamespace_id`=%s AND `room_id`=%s
                 """, ujson.dumps(room_settings), gamespace, room_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to update a room: " + e.args[1])
 
-    @coroutine
-    def update_rooms_state(self, host_id, state, rooms=None, exclusive=False):
+    async def update_rooms_state(self, host_id, state, rooms=None, exclusive=False):
 
         if rooms and not isinstance(rooms, list):
             raise RoomError("Not a list")
@@ -875,7 +848,7 @@ class RoomsModel(Model):
 
         try:
             if rooms is None:
-                yield self.db.execute(
+                await self.db.execute(
                     """
                     UPDATE `rooms`
                     SET `state`=%s
@@ -884,7 +857,7 @@ class RoomsModel(Model):
                 )
             else:
                 if exclusive:
-                    yield self.db.execute(
+                    await self.db.execute(
                         """
                         UPDATE `rooms`
                         SET `state`=%s
@@ -892,35 +865,34 @@ class RoomsModel(Model):
                         """, state, host_id, rooms
                     )
                 else:
-                    yield self.db.execute(
+                    await self.db.execute(
                         """
                         UPDATE `rooms`
                         SET `state`=%s
                         WHERE `host_id`=%s AND `room_id` IN (%s);
                         """, state, host_id, rooms
                     )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to update a room: " + e.args[1])
 
-    @coroutine
-    def get_room(self, gamespace, room_id):
+    async def get_room(self, gamespace, room_id):
         try:
-            room = yield self.db.get(
+            room = await self.db.get(
                 """
                 SELECT * FROM `rooms`
                 WHERE `gamespace_id`=%s AND `room_id`=%s
                 """, gamespace, room_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
 
         if room is None:
             raise RoomNotFound()
 
-        raise Return(RoomAdapter(room))
+        return RoomAdapter(room)
 
-    @coroutine
-    def __prepare__(self, gamespace, settings):
+    # noinspection PyMethodMayBeStatic
+    async def prepare(self, gamespace, settings):
 
         """
         This method takes the game settings generated by schema in GAME_SETTINGS_SCHEME, and prepares it for usage by
@@ -946,7 +918,7 @@ class RoomsModel(Model):
                 internal = Internal()
 
                 try:
-                    access_token = yield internal.request(
+                    access_token = await internal.request(
                         "login", "authenticate",
                         credential="dev", username=username, key=password, scopes=scopes,
                         gamespace_id=gamespace, unique="false")
@@ -962,18 +934,17 @@ class RoomsModel(Model):
             del settings["discover"]
 
             try:
-                services = yield common.discover.cache.get_services(discover, network="external")
+                services = await discover.cache.get_services(discover, network="external")
             except DiscoveryError as e:
-                raise RoomError("Failed to discover services for server-side use: " + e.message)
+                raise RoomError("Failed to discover services for server-side use: " + str(e))
             else:
                 settings["discover"] = services
 
-    @coroutine
-    def instantiate(self, gamespace, game_id, game_version, game_server_name,
-                    deployment_id, room_id, server_host, game_settings, server_settings,
-                    room_settings, other_settings=None):
+    async def instantiate(self, gamespace, game_id, game_version, game_server_name,
+                          deployment_id, room_id, server_host, game_settings, server_settings,
+                          room_settings, other_settings=None):
 
-        yield self.__prepare__(gamespace, game_settings)
+        await self.prepare(gamespace, game_settings)
 
         settings = {
             "game": game_settings,
@@ -985,7 +956,7 @@ class RoomsModel(Model):
             settings["other"] = other_settings
 
         try:
-            result = yield self.internal.post(
+            result = await self.internal.post(
                 server_host, "spawn",
                 {
                     "game_id": game_id,
@@ -1000,10 +971,9 @@ class RoomsModel(Model):
         except InternalError as e:
             raise RoomError("Failed to spawn a new game server: " + str(e.code) + " " + e.body)
 
-        raise Return(result)
+        return result
 
-    @coroutine
-    def __join_room_multi__(self, gamespace, room_id, host_id, members, db):
+    async def __join_room_multi__(self, gamespace, room_id, host_id, members, db):
         """
         Joins a bulk of players to the room. A slot for each token is guaranteed
 
@@ -1020,8 +990,8 @@ class RoomsModel(Model):
 
         try:
             # increment player count (virtually)
-            yield self.__inc_players_num__(gamespace, room_id, db, len(members))
-            yield db.commit()
+            await self.__inc_players_num__(gamespace, room_id, db, len(members))
+            await db.commit()
 
             data = []
             scheme = []
@@ -1033,14 +1003,14 @@ class RoomsModel(Model):
                 data.extend([gamespace, token.account, room_id, host_id, key, token.key, ujson.dumps(info)])
                 scheme.append('(%s, %s, %s, %s, %s, %s, %s)')
 
-            first_record_id = yield db.insert(
+            first_record_id = await db.insert(
                 """
                 INSERT INTO `players`
                 (`gamespace_id`, `account_id`, `room_id`, `host_id`, `key`, `access_token`, `info`)
                 VALUES {0};
                 """.format(",".join(scheme)), *data
             )
-            yield db.commit()
+            await db.commit()
 
             result = {
                 token.account: (record_id, keys[token.account])
@@ -1050,15 +1020,14 @@ class RoomsModel(Model):
             accounts = [token.account for token, info in members]
             self.trigger_remove_temp_reservation_multi(gamespace, room_id, accounts)
 
-            yield db.commit()
+            await db.commit()
 
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
 
-        raise Return(result)
+        return result
 
-    @coroutine
-    def __join_room__(self, gamespace, room_id, host_id, account_id, access_token, player_info, db):
+    async def __join_room__(self, gamespace, room_id, host_id, account_id, access_token, player_info, db):
         """
         Joins the player to the room
         :param gamespace: the gamespace
@@ -1075,92 +1044,87 @@ class RoomsModel(Model):
 
         try:
             # increment player count (virtually)
-            yield self.__inc_players_num__(gamespace, room_id, db)
-            yield db.commit()
+            await self.__inc_players_num__(gamespace, room_id, db)
+            await db.commit()
 
-            record_id = yield self.__insert_player__(
+            record_id = await self.__insert_player__(
                 gamespace, account_id, room_id, host_id, key, access_token, player_info, db, True)
-            yield db.commit()
+            await db.commit()
 
-            yield db.commit()
+            await db.commit()
 
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to join a room: " + e.args[1])
 
-        raise Return((record_id, key))
+        return (record_id, key)
 
-    @coroutine
-    def leave_room(self, gamespace, room_id, account_id, remove_room=False):
+    async def leave_room(self, gamespace, room_id, account_id, remove_room=False):
         try:
-            with (yield self.db.acquire()) as db:
-                yield db.execute(
+            async with self.db.acquire() as db:
+                await db.execute(
                     """
                     DELETE FROM `players`
                     WHERE `gamespace_id`=%s AND `account_id`=%s AND `room_id`=%s
                     LIMIT 1;
                     """, gamespace, account_id, room_id
                 )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to leave a room: " + e.args[1])
         finally:
             if remove_room:
-                yield self.remove_room(gamespace, room_id)
+                await self.remove_room(gamespace, room_id)
 
-    @coroutine
-    def leave_room_multi(self, gamespace, room_id, accounts, remove_room=False):
+    async def leave_room_multi(self, gamespace, room_id, accounts, remove_room=False):
         try:
-            with (yield self.db.acquire()) as db:
-                yield db.execute(
+            async with self.db.acquire() as db:
+                await db.execute(
                     """
                     DELETE FROM `players`
                     WHERE `gamespace_id`=%s AND `account_id` IN %s AND `room_id`=%s;
                     """, gamespace, accounts, room_id
                 )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to leave a room: " + e.args[1])
         finally:
             if remove_room:
-                yield self.remove_room(gamespace, room_id)
+                await self.remove_room(gamespace, room_id)
 
-    @coroutine
-    def leave_room_reservation(self, record_id):
-        with (yield self.db.acquire()) as db:
+    async def leave_room_reservation(self, record_id):
+        async with self.db.acquire() as db:
             try:
-                result = yield db.execute(
+                result = await db.execute(
                     """
                     DELETE FROM `players`
                     WHERE `record_id`=%s AND `state`='RESERVED'
                     LIMIT 1;
                     """, record_id)
-            except common.database.DatabaseError as e:
-                raise Return(False)
+            except database.DatabaseError as e:
+                return False
             else:
-                raise Return(result)
+                return result
 
-    @coroutine
-    def leave_room_reservation_multi(self, gamespace, room_id, accounts):
+    async def leave_room_reservation_multi(self, gamespace, room_id, accounts):
         try:
-            with (yield self.db.acquire()) as db:
-                result = yield db.execute(
+            async with self.db.acquire() as db:
+                result = await db.execute(
                     """
                     DELETE FROM `players`
                     WHERE `gamespace_id`=%s AND `account_id` IN %s AND `room_id`=%s AND `state`='RESERVED';
                     """, gamespace, accounts, room_id
                 )
 
-                raise Return(result)
-        except common.database.DatabaseError as e:
+                return result
+        except database.DatabaseError as e:
             # well, a dead lock is possible here, so ignore it as it happens
             pass
 
-    @coroutine
-    def list_rooms(self, gamespace, game_name, game_version, game_server_id, settings,
-                   regions_order=None, show_full=True, region=None, host=None):
+    async def list_rooms(self, gamespace, game_name, game_version, game_server_id, settings,
+                         regions_order=None, show_full=True, region=None, host=None):
 
         try:
-            conditions = common.database.format_conditions_json('settings', settings)
-        except common.database.ConditionError as e:
-            raise RoomError(e.message)
+            conditions = database.format_conditions_json('settings', settings)
+        except database.ConditionError as e:
+            raise RoomError(str(e))
 
         try:
             query = RoomQuery(gamespace, game_name, game_version, game_server_id)
@@ -1176,28 +1140,27 @@ class RoomsModel(Model):
 
             query.host_active = True
 
-            rooms = yield query.query(self.db, one=False)
-        except common.database.DatabaseError as e:
+            rooms = await query.query(self.db, one=False)
+        except database.DatabaseError as e:
             raise RoomError("Failed to get room: " + e.args[1])
 
-        raise Return(rooms)
+        return rooms
 
-    @coroutine
-    def terminate_room(self, gamespace, room_id, room=None, host=None):
+    async def terminate_room(self, gamespace, room_id, room=None, host=None):
 
         if not room:
-            room = yield self.get_room(gamespace, room_id)
+            room = await self.get_room(gamespace, room_id)
 
         if not host:
             try:
-                host = yield self.hosts.get_host(room.host_id)
+                host = await self.hosts.get_host(room.host_id)
             except HostNotFound:
                 raise RoomError("Failed to get host, not found: " + room.host_id)
 
         server_host = host.internal_location
 
         try:
-            yield self.internal.post(
+            await self.internal.post(
                 server_host, "terminate",
                 {
                     "room_id": room_id,
@@ -1212,24 +1175,23 @@ class RoomsModel(Model):
             else:
                 raise RoomError("Failed to terminate a room: " + str(e.code) + " " + e.body)
 
-        yield self.remove_room(gamespace, room_id)
+        await self.remove_room(gamespace, room_id)
 
-    @coroutine
-    def execute_stdin_command(self, gamespace, room_id, command, room=None, host=None):
+    async def execute_stdin_command(self, gamespace, room_id, command, room=None, host=None):
 
         if not room:
-            room = yield self.get_room(gamespace, room_id)
+            room = await self.get_room(gamespace, room_id)
 
         if not host:
             try:
-                host = yield self.hosts.get_host(room.host_id)
+                host = await self.hosts.get_host(room.host_id)
             except HostNotFound:
                 raise RoomError("Failed to get host, not found: " + room.host_id)
 
         server_host = host.internal_location
 
         try:
-            yield self.internal.post(
+            await self.internal.post(
                 server_host, "execute_stdin",
                 {
                     "room_id": room_id,
@@ -1240,67 +1202,64 @@ class RoomsModel(Model):
         except InternalError as e:
             raise RoomError("Failed to execute a command: " + str(e.code) + " " + e.body)
 
-    @coroutine
-    def remove_host_rooms(self, host_id, except_rooms=None):
+    async def remove_host_rooms(self, host_id, except_rooms=None):
         try:
             # cleanup empty room
 
-            with (yield self.db.acquire()) as db:
+            async with self.db.acquire() as db:
                 if except_rooms:
-                    yield db.execute(
+                    await db.execute(
                         """
                         DELETE FROM `rooms`
                         WHERE `host_id`=%s AND `room_id` NOT IN %s;
                         """, host_id, except_rooms
                     )
-                    yield db.execute(
+                    await db.execute(
                         """
                         DELETE FROM `players`
                         WHERE `host_id`=%s AND `room_id` NOT IN %s;
                         """, host_id, except_rooms
                     )
                 else:
-                    yield db.execute(
+                    await db.execute(
                         """
                         DELETE FROM `rooms`
                         WHERE `host_id`=%s;
                         """, host_id
                     )
-                    yield db.execute(
+                    await db.execute(
                         """
                         DELETE FROM `players`
                         WHERE `host_id`=%s
                         """, host_id
                     )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to remove rooms: " + e.args[1])
 
-    @coroutine
-    def remove_room(self, gamespace, room_id):
+    async def remove_room(self, gamespace, room_id):
         try:
             # cleanup empty room
 
-            with (yield self.db.acquire()) as db:
-                yield db.execute(
+            async with self.db.acquire() as db:
+                await db.execute(
                     """
                     DELETE FROM `players`
                     WHERE `gamespace_id`=%s AND `room_id`=%s;
                     """, gamespace, room_id
                 )
-                yield db.execute(
+                await db.execute(
                     """
                     DELETE FROM `rooms`
                     WHERE `room_id`=%s AND `gamespace_id`=%s;
                     """, room_id, gamespace
                 )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RoomError("Failed to leave a room: " + e.args[1])
 
-    @coroutine
-    def spawn_server(self, gamespace, game_id, game_version, game_server_name, deployment_id,
-                     room_id, host, game_settings, server_settings, room_settings, other_settings=None):
+    async def spawn_server(self, gamespace, game_id, game_version, game_server_name, deployment_id,
+                           room_id, host, game_settings, server_settings, room_settings, other_settings=None):
 
-        result = yield self.instantiate(
+        result = await self.instantiate(
             gamespace, game_id, game_version, game_server_name,
             deployment_id, room_id, host.internal_location,
             game_settings, server_settings, room_settings, other_settings)
@@ -1310,6 +1269,6 @@ class RoomsModel(Model):
 
         location = result["location"]
 
-        yield self.assign_location(gamespace, room_id, location)
+        await self.assign_location(gamespace, room_id, location)
 
-        raise Return(result)
+        return result

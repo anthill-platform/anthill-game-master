@@ -1,8 +1,7 @@
 
-from tornado.gen import coroutine, Return
-import common.database
-from common.model import Model
-from common.validate import validate
+from anthill.common import database
+from anthill.common.model import Model
+from anthill.common.validate import validate
 
 import ujson
 
@@ -68,40 +67,36 @@ class HostsModel(Model):
     def get_setup_tables(self):
         return ["regions", "hosts"]
 
-    @coroutine
-    def setup_table_regions(self):
-        yield self.new_region("local", True, {})
+    async def setup_table_regions(self):
+        await self.new_region("local", True, {})
 
-    @coroutine
-    def setup_table_hosts(self):
+    async def setup_table_hosts(self):
 
         try:
-            region = yield self.find_region("local")
+            region = await self.find_region("local")
         except RegionNotFound:
             pass
         else:
-            yield self.new_host("localhost", "http://localhost:9509", region.region_id, True)
+            await self.new_host("localhost", "http://localhost:9509", region.region_id, True)
 
-    @coroutine
     @validate(name="str_name", default="bool", settings="json")
-    def new_region(self, name, default, settings):
+    async def new_region(self, name, default, settings):
         try:
-            region_id = yield self.db.insert(
+            region_id = await self.db.insert(
                 """
                 INSERT INTO `regions`
                 (`region_name`, `region_location`, `region_default`, `region_settings`)
                 VALUES (%s, point(0, 0), %s, %s);
                 """, name, int(bool(default)), ujson.dumps(settings)
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RegionError("Failed to create a region: " + e.args[1])
         else:
-            raise Return(region_id)
+            return region_id
 
-    @coroutine
-    def get_region(self, region_id):
+    async def get_region(self, region_id):
         try:
-            region = yield self.db.get(
+            region = await self.db.get(
                 """
                 SELECT *,
                     ST_X(`region_location`) AS `region_location_x`,
@@ -111,19 +106,18 @@ class HostsModel(Model):
                 LIMIT 1;
                 """, region_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RegionError("Failed to get region: " + e.args[1])
 
         if region is None:
             raise RegionNotFound()
 
-        raise Return(RegionAdapter(region))
+        return RegionAdapter(region)
 
-    @coroutine
     @validate(region_name="str_name")
-    def find_region(self, region_name):
+    async def find_region(self, region_name):
         try:
-            region = yield self.db.get(
+            region = await self.db.get(
                 """
                 SELECT *,
                     ST_X(`region_location`) AS `region_location_x`,
@@ -133,18 +127,17 @@ class HostsModel(Model):
                 LIMIT 1;
                 """, region_name
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RegionError("Failed to get region: " + e.args[1])
 
         if region is None:
             raise RegionNotFound()
 
-        raise Return(RegionAdapter(region))
+        return RegionAdapter(region)
 
-    @coroutine
-    def get_best_host(self, region_id):
+    async def get_best_host(self, region_id):
         try:
-            host = yield self.db.get(
+            host = await self.db.get(
                 """
                 SELECT *
                 FROM `hosts`
@@ -153,18 +146,17 @@ class HostsModel(Model):
                 LIMIT 1;
                 """, region_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to get host: " + e.args[1])
 
         if host is None:
             raise HostNotFound()
 
-        raise Return(HostAdapter(host))
+        return HostAdapter(host)
 
-    @coroutine
-    def get_closest_region(self, p_long, p_lat):
+    async def get_closest_region(self, p_long, p_lat):
         try:
-            region = yield self.db.get(
+            region = await self.db.get(
                 """
                 SELECT *,
                     ST_X(`region_location`) AS `region_location_x`,
@@ -175,18 +167,17 @@ class HostsModel(Model):
                 LIMIT 1;
                 """, p_long, p_lat
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RegionError("Failed to get closest region: " + e.args[1])
 
         if region is None:
             raise RegionNotFound()
 
-        raise Return(RegionAdapter(region))
+        return RegionAdapter(region)
 
-    @coroutine
-    def list_closest_regions(self, p_long, p_lat):
+    async def list_closest_regions(self, p_long, p_lat):
         try:
-            hosts = yield self.db.query(
+            hosts = await self.db.query(
                 """
                 SELECT *,
                     ST_X(`region_location`) AS `region_location_x`,
@@ -196,15 +187,14 @@ class HostsModel(Model):
                 ORDER BY distance ASC;
                 """, p_long, p_lat
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RegionError("Failed to get server: " + e.args[1])
 
-        raise Return(map(RegionAdapter, hosts))
+        return map(RegionAdapter, hosts)
 
-    @coroutine
-    def list_regions(self):
+    async def list_regions(self):
         try:
-            regions = yield self.db.query(
+            regions = await self.db.query(
                 """
                 SELECT *,
                     ST_X(`region_location`) AS `region_location_x`,
@@ -212,15 +202,14 @@ class HostsModel(Model):
                 FROM `regions`;
                 """
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RegionError("Failed to list regions: " + e.args[1])
 
-        raise Return(map(RegionAdapter, regions))
+        return map(RegionAdapter, regions)
 
-    @coroutine
-    def get_default_region(self):
+    async def get_default_region(self):
         try:
-            region = yield self.db.get(
+            region = await self.db.get(
                 """
                 SELECT *,
                     ST_X(`region_location`) AS `region_location_x`,
@@ -230,91 +219,85 @@ class HostsModel(Model):
                 LIMIT 1;
                 """
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to get server: " + e.args[1])
 
         if region is None:
             raise RegionNotFound()
 
-        raise Return(RegionAdapter(region))
+        return RegionAdapter(region)
 
-    @coroutine
     @validate(region_id="int", name="str_name", default="bool", setting="json")
-    def update_region(self, region_id, name, default, settings):
+    async def update_region(self, region_id, name, default, settings):
         try:
-            yield self.db.execute(
+            await self.db.execute(
                 """
                 UPDATE `regions`
                 SET `region_name`=%s, `region_default`=%s, `region_settings`=%s
                 WHERE `region_id`=%s;
                 """, name, int(bool(default)), ujson.dumps(settings), region_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RegionError("Failed to update region: " + e.args[1])
 
-    @coroutine
-    def update_region_geo_location(self, region_id, p_long, p_lat):
+    async def update_region_geo_location(self, region_id, p_long, p_lat):
         try:
-            yield self.db.execute(
+            await self.db.execute(
                 """
                 UPDATE `regions`
                 SET `region_location`=point(%s, %s)
                 WHERE `region_id`=%s
                 """, p_long, p_lat, region_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to update host geo location: " + e.args[1])
 
-    @coroutine
-    def delete_region(self, region_id):
+    async def delete_region(self, region_id):
         try:
-            yield self.db.execute(
+            await self.db.execute(
                 """
                 DELETE FROM `regions`
                 WHERE `region_id`=%s
                 """, region_id
             )
-        except common.database.ConstraintsError:
+        except database.ConstraintsError:
             raise RegionError("Dependent host exists")
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise RegionError("Failed to delete a region: " + e.args[1])
 
-    @coroutine
-    def new_host(self, name, internal_location, region, enabled=True):
+    async def new_host(self, name, internal_location, region, enabled=True):
 
         try:
-            host_id = yield self.db.insert(
+            host_id = await self.db.insert(
                 """
                 INSERT INTO `hosts`
                 (`host_name`, `internal_location`, `host_region`,  `host_enabled`)
                 VALUES (%s, %s, %s, %s)
                 """, name, internal_location, region, int(bool(enabled))
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to create a host: " + e.args[1])
         else:
-            raise Return(host_id)
+            return host_id
 
-    @coroutine
-    def update_host(self, host_id, name, internal_location, enabled):
+    async def update_host(self, host_id, name, internal_location, enabled):
         try:
-            yield self.db.execute(
+            await self.db.execute(
                 """
                 UPDATE `hosts`
                 SET `host_name`=%s, `internal_location`=%s, `host_enabled`=%s
                 WHERE `host_id`=%s
                 """, name, internal_location, int(bool(enabled)), host_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to update host: " + e.args[1])
 
-    @coroutine
-    def update_host_load(self, host_id, memory, cpu, state='ACTIVE', db=None):
+    async def update_host_load(self, host_id, memory, cpu, state='ACTIVE', db=None):
 
         total_load = max(memory, cpu) / 100.0
 
         try:
-            yield (db or self.db).execute(
+            await (db or self.db).execute(
                 """
                 UPDATE `hosts`
                 SET `host_load`=%s, `host_memory`=%s, `host_cpu`=%s, `host_state`=%s,
@@ -322,13 +305,12 @@ class HostsModel(Model):
                     `host_processing`=0
                 WHERE `host_id`=%s
                 """, total_load, memory, cpu, state, host_id)
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to update host load: " + e.args[1])
 
-    @coroutine
-    def find_host(self, host_name):
+    async def find_host(self, host_name):
         try:
-            host = yield self.db.get(
+            host = await self.db.get(
                 """
                 SELECT *
                 FROM `hosts`
@@ -336,18 +318,17 @@ class HostsModel(Model):
                 LIMIT 1;
                 """, host_name
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to get server: " + e.args[1])
 
         if host is None:
             raise HostNotFound()
 
-        raise Return(HostAdapter(host))
+        return HostAdapter(host)
 
-    @coroutine
-    def get_host(self, host_id):
+    async def get_host(self, host_id):
         try:
-            host = yield self.db.get(
+            host = await self.db.get(
                 """
                 SELECT *
                 FROM `hosts`
@@ -355,58 +336,55 @@ class HostsModel(Model):
                 LIMIT 1;
                 """, host_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to get server: " + e.args[1])
 
         if host is None:
             raise HostNotFound()
 
-        raise Return(HostAdapter(host))
+        return HostAdapter(host)
 
-    @coroutine
-    def list_enabled_hosts(self):
+    async def list_enabled_hosts(self):
         try:
-            hosts = yield self.db.query(
+            hosts = await self.db.query(
                 """
                 SELECT *
                 FROM `hosts`
                 WHERE `host_enabled`=1;
                 """)
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to get hosts: " + e.args[1])
 
-        raise Return(map(HostAdapter, hosts))
+        return map(HostAdapter, hosts)
 
-    @coroutine
-    def list_hosts(self, region_id=None):
+    async def list_hosts(self, region_id=None):
         try:
             if region_id:
-                hosts = yield self.db.query(
+                hosts = await self.db.query(
                     """
                     SELECT *
                     FROM `hosts`
                     WHERE `host_region`=%s;
                     """, region_id)
             else:
-                hosts = yield self.db.query(
+                hosts = await self.db.query(
                     """
                     SELECT *
                     FROM `hosts`;
                     """)
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to get server: " + e.args[1])
 
-        raise Return(map(HostAdapter, hosts))
+        return map(HostAdapter, hosts)
 
-    @coroutine
-    def delete_host(self, host_id):
+    async def delete_host(self, host_id):
 
         try:
-            yield self.db.execute(
+            await self.db.execute(
                 """
                 DELETE FROM `hosts`
                 WHERE `host_id`=%s
                 """, host_id
             )
-        except common.database.DatabaseError as e:
+        except database.DatabaseError as e:
             raise HostError("Failed to delete a server: " + e.args[1])

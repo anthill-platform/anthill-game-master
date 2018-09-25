@@ -1,41 +1,33 @@
 
-from tornado.gen import coroutine, Return
-from common.options import options
+from anthill.common import database, keyvalue, server, ratelimit, access
+from anthill.common.options import options
 
-import admin
-import handlers as h
-import common.access
-import common.database
-import common.environment
-import common.keyvalue
-import common.server
-import common.sign
-import common.ratelimit
+from . import admin
+from . import handlers as h
+from . import options as _opts
 
-from model.gameserver import GameServersModel
-from model.room import RoomsModel
-from model.controller import ControllersClientModel
-from model.host import HostsModel
-from model.deploy import DeploymentModel
-from model.ban import BansModel
-from model.heartbeat import HeartbeatModel
-from model.party import PartyModel
-
-import options as _opts
+from . model.gameserver import GameServersModel
+from . model.room import RoomsModel
+from . model.controller import ControllersClientModel
+from . model.host import HostsModel
+from . model.deploy import DeploymentModel
+from . model.ban import BansModel
+from . model.heartbeat import HeartbeatModel
+from . model.party import PartyModel
 
 
-class GameMasterServer(common.server.Server):
+class GameMasterServer(server.Server):
     # noinspection PyShadowingNames
     def __init__(self):
         super(GameMasterServer, self).__init__()
 
-        self.db = common.database.Database(
+        self.db = database.Database(
             host=options.db_host,
             database=options.db_name,
             user=options.db_username,
             password=options.db_password)
 
-        self.cache = common.keyvalue.KeyValueStorage(
+        self.cache = keyvalue.KeyValueStorage(
             host=options.cache_host,
             port=options.cache_port,
             db=options.cache_db,
@@ -50,7 +42,7 @@ class GameMasterServer(common.server.Server):
 
         self.ctl_client = ControllersClientModel(self.rooms, self.deployments)
 
-        self.ratelimit = common.ratelimit.RateLimit({
+        self.ratelimit = ratelimit.RateLimit({
             "create_room": options.rate_create_room
         })
 
@@ -128,7 +120,7 @@ class GameMasterServer(common.server.Server):
 
 
 if __name__ == "__main__":
-    stt = common.server.init()
+    stt = server.init()
 
-    common.access.AccessToken.init([common.access.public()])
-    common.server.start(GameMasterServer)
+    access.AccessToken.init([access.public()])
+    server.start(GameMasterServer)

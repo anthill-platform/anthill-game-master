@@ -1,13 +1,12 @@
 
 from tornado.ioloop import PeriodicCallback
-from tornado.gen import coroutine, Return
 
-from common.model import Model
-from common.options import options
-from common.internal import Internal, InternalError
-from common import to_int
+from anthill.common.model import Model
+from anthill.common.options import options
+from anthill.common.internal import Internal, InternalError
+from anthill.common import to_int
 
-from host import HostAdapter
+from . host import HostAdapter
 
 import logging
 
@@ -38,21 +37,18 @@ class HeartbeatModel(Model):
         self.internal = Internal()
         self.processing = False
 
-    @coroutine
-    def started(self, application):
-        yield super(HeartbeatModel, self).started(application)
+    async def started(self, application):
+        await super(HeartbeatModel, self).started(application)
         self.update_cb.start()
 
-    @coroutine
-    def stopped(self):
+    async def stopped(self):
         self.update_cb.stop()
 
-    @coroutine
-    def __check_host__(self, host):
+    async def __check_host__(self, host):
         logging.debug("Checking host {0} ({1})".format(host.host_id, host.internal_location))
 
         try:
-            report = yield self.internal.get(
+            report = await self.internal.get(
                 host.internal_location,
                 "heartbeat",
                 {},
@@ -68,20 +64,19 @@ class HeartbeatModel(Model):
 
             raise HeartbeatError()
         else:
-            raise Return(HeartbeatReport(report))
+            return HeartbeatReport(report)
 
-    @coroutine
-    def update(self):
+    async def update(self):
 
         if self.processing:
             return
 
         self.processing = True
 
-        with (yield self.db.acquire()) as db:
+        async with self.db.acquire() as db:
 
             try:
-                hosts = yield db.query(
+                hosts = await db.query(
                     """
                         SELECT * FROM `hosts`
                         WHERE `host_enabled`=1;
@@ -96,7 +91,7 @@ class HeartbeatModel(Model):
                         # noinspection PyBroadException
                         try:
                             # process hosts one by one
-                            report = yield self.__check_host__(host)
+                            report = await self.__check_host__(host)
                         except:
                             failed.append(host.host_id)
                         else:
@@ -106,13 +101,13 @@ class HeartbeatModel(Model):
                                 state = 'ACTIVE'
 
                             # update load in case of success
-                            yield self.app.hosts.update_host_load(host.host_id, report.memory, report.cpu, state, db=db)
+                            await self.app.hosts.update_host_load(host.host_id, report.memory, report.cpu, state, db=db)
 
                             # delete rooms not listed in that list
-                            yield self.app.rooms.remove_host_rooms(host.host_id, except_rooms=report.rooms)
+                            await self.app.rooms.remove_host_rooms(host.host_id, except_rooms=report.rooms)
 
                     if failed:
-                        yield db.execute(
+                        await db.execute(
                             """
                                 UPDATE `hosts`
                                 SET `host_state`='ERROR'
