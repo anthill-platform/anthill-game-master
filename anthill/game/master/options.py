@@ -1,5 +1,6 @@
 
 from anthill.common.options import define
+import os
 
 # Main
 
@@ -101,10 +102,18 @@ define("rate_create_room",
 
 # Deployments
 
-define("deployments_location",
-       default="/usr/local/anthill/game-master-deployments",
-       help="A limit for room creation for user tuple: (amount, time)",
-       type=str)
+if os.name == "nt":
+    # Windows
+    define("deployments_location",
+           default="C:/Anthill/game-master-deployments",
+           help="A limit for room creation for user tuple: (amount, time)",
+           type=str)
+else:
+    # Unix
+    define("deployments_location",
+           default="/usr/local/anthill/game-master-deployments",
+           help="A limit for room creation for user tuple: (amount, time)",
+           type=str)
 
 define("heartbeat_time",
        default=30,
