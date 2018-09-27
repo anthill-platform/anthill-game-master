@@ -1297,10 +1297,10 @@ class DebugHostController(a.AdminController):
         except RegionError as e:
             raise a.ActionError(str(e))
 
-        raise a.Return({
+        return {
             "host": host,
             "region": region
-        })
+        }
 
     def render(self, data):
         return [
