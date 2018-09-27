@@ -1,8 +1,10 @@
 
-from tornado.gen import IOLoop
+from tornado.gen import multi
+from tornado.ioloop import IOLoop
 import tornado.httpclient
 
 import anthill.common.admin as a
+from anthill.common import run_on_executor
 from anthill.common.environment import EnvironmentClient, AppNotFound
 from anthill.common.database import format_conditions_json, ConditionError
 from anthill.common.validate import validate
@@ -14,7 +16,6 @@ from . model.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
 from . model.ban import NoSuchBan, BanError, UserAlreadyBanned
 from . model.room import RoomQuery, RoomNotFound, RoomError
 
-from tornado.concurrent import run_on_executor
 from concurrent.futures import ThreadPoolExecutor
 
 from geoip import geolite2
@@ -743,7 +744,7 @@ class Delivery(object):
         deployment_path = os.path.join(location, game_name, game_version, deployment_id + ".zip")
 
         try:
-            f = open(deployment_path, "r")
+            f = open(deployment_path, "rb")
         except Exception as e:
             await deployments.update_deployment_delivery_status(
                 self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR,
@@ -799,7 +800,7 @@ class Delivery(object):
         ]
 
         try:
-            await tasks
+            await multi(tasks)
         except Exception as e:
             logging.error("Error deliver deployment {0}: {1}".format(
                 deployment_id, str(e)
@@ -842,12 +843,12 @@ class Delivery(object):
         deployments = self.application.deployments
 
         try:
-            hosts_list = await hosts.list_enabled_hosts()
+            hosts_list = list(await hosts.list_enabled_hosts())
         except HostError as e:
             raise a.ActionError("Failed to list hosts: " + str(e))
 
         try:
-            deliveries = await deployments.list_deployment_deliveries(self.gamespace, deployment_id)
+            deliveries = list(await deployments.list_deployment_deliveries(self.gamespace, deployment_id))
         except DeploymentDeliveryError as e:
             raise a.ActionError("Failed to list deliveries: " + str(e))
 
@@ -909,7 +910,7 @@ class Delivery(object):
         ]
 
         try:
-            await tasks
+            await multi(tasks)
         except Exception as e:
             logging.exception("Failed to delete deployment {0}".format(deployment.deployment_id))
             await deployments.update_deployment_status(
@@ -1160,7 +1161,7 @@ class DeployApplicationController(a.UploadAdminController):
             os.mkdir(version_location)
 
         self.deployment_path = os.path.join(location, game_name, game_version, str(self.deployment) + ".zip")
-        self.deployment_file = open(self.deployment_path, "w")
+        self.deployment_file = open(self.deployment_path, "wb")
         self.sha256 = hashlib.sha256()
 
     @run_on_executor
@@ -1354,9 +1355,9 @@ class NewHostController(a.AdminController):
         except RegionError as e:
             raise a.ActionError(str(e))
 
-        raise a.Return({
+        return {
             "region": region
-        })
+        }
 
     def render(self, data):
         return [
@@ -1924,9 +1925,9 @@ class NewRegionController(a.AdminController):
             region_id=region_id)
 
     async def get(self):
-        raise a.Return({
+        return {
             "settings": {}
-        })
+        }
 
     def render(self, data):
         return [

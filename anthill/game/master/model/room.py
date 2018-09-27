@@ -5,7 +5,7 @@ from anthill.common.model import Model
 from anthill.common.internal import Internal, InternalError
 from anthill.common.discover import DiscoveryError
 from anthill.common.validate import validate
-from anthill.common import random_string, database
+from anthill.common import random_string, database, discover
 
 from .gameserver import GameServerAdapter
 from .host import RegionAdapter, HostAdapter, HostNotFound
@@ -928,13 +928,13 @@ class RoomsModel(Model):
                 else:
                     settings["token"] = access_token["token"]
 
-        discover = settings.get("discover", None)
+        discovery_settings = settings.get("discover", None)
 
-        if discover:
+        if discovery_settings:
             del settings["discover"]
 
             try:
-                services = await discover.cache.get_services(discover, network="external")
+                services = await discover.cache.get_services(discovery_settings, network="external")
             except DiscoveryError as e:
                 raise RoomError("Failed to discover services for server-side use: " + str(e))
             else:
