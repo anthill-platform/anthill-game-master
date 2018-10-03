@@ -64,12 +64,22 @@ class GameServersModel(Model):
         "properties": {
             "binary": {
                 "type": "string",
-                "title": "Application Binary",
+                "title": "Application Binary (Unix)",
                 "description": "A binary file would be called at server startup",
                 "minLength": 1,
                 "propertyOrder": 1,
                 "options": {
-                    "grid_columns": 4
+                    "grid_columns": 6
+                }
+            },
+            "binary_win": {
+                "type": "string",
+                "title": "Application Binary (Windows)",
+                "description": "If the server is possible to run on Windows, same applies here",
+                "minLength": 1,
+                "propertyOrder": 2,
+                "options": {
+                    "grid_columns": 6
                 }
             },
             "ports": {
@@ -80,9 +90,9 @@ class GameServersModel(Model):
                 "default": 1,
                 "maximum": 4,
                 "minimum": 1,
-                "propertyOrder": 2,
+                "propertyOrder": 3,
                 "options": {
-                    "grid_columns": 4
+                    "grid_columns": 6
                 }
             },
             "check_period": {
@@ -92,10 +102,10 @@ class GameServersModel(Model):
                 "description": "How often check the game server health (in seconds)",
                 "maximum": 600,
                 "minimum": 5,
-                "propertyOrder": 3,
+                "propertyOrder": 4,
                 "default": 60,
                 "options": {
-                    "grid_columns": 4
+                    "grid_columns": 6
                 }
             },
             "token": {

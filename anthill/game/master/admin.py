@@ -1310,7 +1310,8 @@ class DebugHostController(a.AdminController):
                 a.link("host", data["host"].name,
                        host_id=self.context.get("host_id"))
             ], "Debug"),
-            a.script("static/admin/debug_controller.js", server=self.context.get("host_id"),
+            a.script(self.application.module_path("static/admin/debug_controller.js"),
+                     server=self.context.get("host_id"),
                      room=self.context.get("room_id")),
             a.links("Navigate", [
                 a.link("server", "Go back", icon="chevron-left", host_id=self.context.get("host_id"))
