@@ -283,7 +283,7 @@ class GameServersModel(Model):
         except database.DatabaseError as e:
             raise GameError("Failed to get game settings:" + e.args[1])
 
-        return map(GameServerAdapter, servers)
+        return list(map(GameServerAdapter, servers))
 
     async def find_game_server(self, gamespace_id, game_name, game_server_name):
         try:

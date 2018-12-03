@@ -356,7 +356,7 @@ class RoomsModel(Model):
         except database.DatabaseError as e:
             raise RoomError("Failed to get players count: " + e.args[1])
 
-        return map(HostsPlayersCountAdapter, counts)
+        return list(map(HostsPlayersCountAdapter, counts))
 
     async def list_player_records(self, gamespace, account_id):
         try:
@@ -378,7 +378,7 @@ class RoomsModel(Model):
         except database.DatabaseError as e:
             raise RoomError("Failed to get players count: " + e.args[1])
         else:
-            return map(PlayerRecordAdapter, player_records)
+            return list(map(PlayerRecordAdapter, player_records))
 
     @validate(gamespace="int", account_ids="json_list_of_ints")
     async def list_players_records(self, gamespace, account_ids):

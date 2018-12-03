@@ -190,7 +190,7 @@ class HostsModel(Model):
         except database.DatabaseError as e:
             raise RegionError("Failed to get server: " + e.args[1])
 
-        return map(RegionAdapter, hosts)
+        return list(map(RegionAdapter, hosts))
 
     async def list_regions(self):
         try:
@@ -205,7 +205,7 @@ class HostsModel(Model):
         except database.DatabaseError as e:
             raise RegionError("Failed to list regions: " + e.args[1])
 
-        return map(RegionAdapter, regions)
+        return list(map(RegionAdapter, regions))
 
     async def get_default_region(self):
         try:
@@ -355,7 +355,7 @@ class HostsModel(Model):
         except database.DatabaseError as e:
             raise HostError("Failed to get hosts: " + e.args[1])
 
-        return map(HostAdapter, hosts)
+        return list(map(HostAdapter, hosts))
 
     async def list_hosts(self, region_id=None):
         try:
@@ -375,7 +375,7 @@ class HostsModel(Model):
         except database.DatabaseError as e:
             raise HostError("Failed to get server: " + e.args[1])
 
-        return map(HostAdapter, hosts)
+        return list(map(HostAdapter, hosts))
 
     async def delete_host(self, host_id):
 

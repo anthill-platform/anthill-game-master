@@ -627,7 +627,7 @@ class PartySession(object):
 
         # noinspection PyBroadException
         try:
-            await channel.close()
+            channel.close()
         except Exception:
             logging.exception("Failed to close the channel")
 
@@ -672,7 +672,7 @@ class PartySession(object):
 
         if self.channel:
             try:
-                await self.channel.close()
+                self.channel.close()
             except Exception:
                 logging.exception("Failed to close the channel")
 
@@ -1009,7 +1009,7 @@ class PartyModel(Model):
         except DatabaseError as e:
             raise PartyError(500, "Failed to list party members: " + e.args[1])
 
-        return map(PartyMemberAdapter, hosts)
+        return list(map(PartyMemberAdapter, hosts))
 
     async def close_party(self, gamespace_id, party_id, message, reason="close"):
 

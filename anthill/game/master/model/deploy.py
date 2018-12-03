@@ -222,7 +222,7 @@ class DeploymentModel(Model):
         except database.DatabaseError as e:
             raise DeploymentError("Failed to get deployment: " + e.args[1])
 
-        return map(DeploymentAdapter, deployments), pages
+        return list(map(DeploymentAdapter, deployments)), pages
 
     @validate(gamespace_id="int", game_name="str", game_version="str")
     async def list_deployments(self, gamespace_id, game_name, game_version=None):
@@ -248,7 +248,7 @@ class DeploymentModel(Model):
         except database.DatabaseError as e:
             raise DeploymentError("Failed to get deployment: " + e.args[1])
 
-        return map(DeploymentAdapter, deployments)
+        return list(map(DeploymentAdapter, deployments))
 
     @run_on_executor
     def __remove_deployment_file__(self, filename):
@@ -350,7 +350,7 @@ class DeploymentModel(Model):
         except database.DatabaseError as e:
             raise DeploymentDeliveryError("Failed to get deployment deliveries: " + e.args[1])
 
-        return map(DeploymentDeliveryAdapter, deliveries)
+        return list(map(DeploymentDeliveryAdapter, deliveries))
 
     @validate(gamespace_id="int", delivery_id="int")
     async def delete_deployment_delivery(self, gamespace_id, delivery_id):
