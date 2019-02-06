@@ -308,7 +308,7 @@ class PartySession(object):
         self.parties.rooms.trigger_remove_temp_reservation_multi(
             self.gamespace_id, self.room_id, [member.account for member in members])
 
-        await [self.send_message(
+        await multi([self.send_message(
             PartySession.MESSAGE_TYPE_GAME_STARTED, {
                 "id": str(self.room_id),
                 "slot": str(record_id),
@@ -317,7 +317,7 @@ class PartySession(object):
                 "settings": room_settings
             }, account_id=account)
             for account, (record_id, key) in records.items()
-            if str(account) != self.account_id]
+            if str(account) != self.account_id])
 
         my_record = records.get(str(self.account_id))
 
@@ -641,7 +641,7 @@ class PartySession(object):
             PartySession.FIELD_PAYLOAD: payload
         })
 
-        await self.channel.basic_publish(
+        self.channel.basic_publish(
             exchange=self.__exchange__name__(),
             routing_key=self.__routing_key__(account_id) if account_id else "all." + str(self.gamespace_id),
             body=body)
