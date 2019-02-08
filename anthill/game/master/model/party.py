@@ -580,13 +580,13 @@ class PartySession(object):
         await self.queue.bind(exchange=self.exchange, routing_key=self.__routing_key__(self.account_id))
         await self.queue.bind(exchange=self.exchange, routing_key="all." + str(self.gamespace_id))
 
-        self.consumer = await self.queue.consume(self.__on_message__)
-
         if self.send_new_player:
             await self.send_message(PartySession.MESSAGE_TYPE_PLAYER_JOINED, {
                 "account": self.account_id,
                 "profile": self.member_profile
             })
+
+        self.consumer = await self.queue.consume(self.__on_message__)
 
         if members:
             self.members = members
