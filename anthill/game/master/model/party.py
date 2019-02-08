@@ -1303,6 +1303,13 @@ class PartyModel(Model):
 
                     session.joined(member_profile, send_new_player=True)
 
+                    members.append(PartyMemberAdapter({
+                        "account_id": account_id,
+                        "member_role": PartyModel.PARTY_ROLE_USER,
+                        "member_profile": member_profile,
+                        "member_token": member_token
+                    }))
+
                     try:
                         await db.execute(
                             """
