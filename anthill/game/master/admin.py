@@ -47,7 +47,7 @@ class ApplicationController(a.AdminController):
         except GameError as e:
             raise a.ActionError("Failed to list game servers: " + str(e))
 
-        app_versions = sorted(app.versions.keys())
+        app_versions = sorted(list(app.versions.keys()))
 
         result = {
             "app_id": record_id,
