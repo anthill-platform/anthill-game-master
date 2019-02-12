@@ -356,7 +356,7 @@ class PlayersGroup(object):
             return True
 
         # remove tokens that are banned
-        self.tokens = filter(filter_banned, self.tokens)
+        self.tokens = list(filter(filter_banned, self.tokens))
 
         if not self.tokens:
             raise PlayerError(404, "No valid players posted (all players are either banned or nor valid)")
