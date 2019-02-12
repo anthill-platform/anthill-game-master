@@ -26,7 +26,7 @@ class PartyError(Exception):
         self.message = message
 
     def __str__(self):
-        return
+        return "{0}: {1}".format(self.code, self.message)
 
 
 class PartyStatus(Enum):
@@ -1263,9 +1263,6 @@ class PartyModel(Model):
                     raise NoSuchParty()
 
                 party = PartyAdapter(party_data)
-
-                if party.status != PartyStatus.CREATED:
-                    raise PartyError(409, "Party have already started a game")
 
                 if party.party_num_members >= party.party_max_members:
                     raise PartyError(406, "Party is full")
