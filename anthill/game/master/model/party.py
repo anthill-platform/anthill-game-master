@@ -561,6 +561,9 @@ class PartySession(object):
                             return result
 
                 self.done = True
+
+                await self.close(1000, "Party is closed due to started game")
+
                 return "OK"
 
             except DatabaseError as e:

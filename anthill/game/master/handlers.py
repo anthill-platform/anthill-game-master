@@ -940,7 +940,6 @@ class PartiesSearchHandler(PartyHandler):
         except NoSuchParty:
             raise HTTPError(3404, "No such party")
 
-
     async def on_closed(self):
         if not self.session:
             return
