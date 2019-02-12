@@ -11,6 +11,8 @@ from anthill.common.profile import PredefinedProfile, ProfileError
 from anthill.common.internal import Internal, InternalError
 from anthill.common import Enum, Flags
 
+from pika.exceptions import ChannelClosed
+
 from .gameserver import GameServerNotFound, GameVersionNotFound
 from .deploy import NoCurrentDeployment
 from .host import HostNotFound
@@ -675,9 +677,17 @@ class PartySession(object):
             except Exception:
                 logging.exception("Failed to delete the queue")
 
+        if self.exchange:
+            try:
+                await self.exchange.delete(if_unused=True)
+            except Exception:
+                logging.exception("Failed to delete the exchange")
+
         if self.channel:
             try:
                 self.channel.close()
+            except ChannelClosed:
+                pass
             except Exception:
                 logging.exception("Failed to close the channel")
 
@@ -687,6 +697,9 @@ class PartySession(object):
 
         # hello gc
         self.parties = None
+        self.channel = None
+        self.exchange = None
+        self.queue = None
         self.released = True
 
     async def __process_message__(self, message_type, payload):
