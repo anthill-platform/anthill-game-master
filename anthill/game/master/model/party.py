@@ -629,8 +629,7 @@ class PartySession(object):
         await channel.basic_publish(
             exchange=exchange_name,
             routing_key=routing_key,
-            body=body,
-            immediate=True)
+            body=body)
 
         # noinspection PyBroadException
         try:
@@ -655,8 +654,7 @@ class PartySession(object):
             self.channel.basic_publish(
                 exchange=self.__exchange__name__(),
                 routing_key=self.__routing_key__(account_id) if account_id else "all." + str(self.gamespace_id),
-                body=body,
-                immediate=True)
+                body=body)
         except ChannelClosed:
             pass
 
