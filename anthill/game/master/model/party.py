@@ -589,7 +589,7 @@ class PartySession(object):
                 "profile": self.member_profile
             })
 
-        self.consumer = await self.queue.consume(self.__on_message__)
+        self.consumer = await self.queue.consume(self.__on_message__, no_ack=True)
 
         if members:
             self.members = members
@@ -626,7 +626,8 @@ class PartySession(object):
         await channel.basic_publish(
             exchange=exchange_name,
             routing_key=routing_key,
-            body=body)
+            body=body,
+            immediate=True)
 
         # noinspection PyBroadException
         try:
@@ -647,7 +648,8 @@ class PartySession(object):
         self.channel.basic_publish(
             exchange=self.__exchange__name__(),
             routing_key=self.__routing_key__(account_id) if account_id else "all." + str(self.gamespace_id),
-            body=body)
+            body=body,
+            immediate=True)
 
     async def close(self, code, reason):
         await self.release(remove_member=False)
