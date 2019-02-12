@@ -574,13 +574,14 @@ class PartySession(object):
                 await db.commit()
 
     async def init(self, members=None):
-        self.channel = await self.broker.acquire_channel()
+        self.channel = await self.broker.channel()
+
         self.exchange = await self.channel.exchange(
             exchange=self.__exchange__name__(),
             exchange_type='topic',
             auto_delete=True)
 
-        self.queue = await self.channel.queue(exclusive=True, arguments={"x-message-ttl": 1000})
+        self.queue = await self.channel.queue(exclusive=True, auto_delete=True, arguments={"x-message-ttl": 1000})
 
         await self.queue.bind(exchange=self.exchange, routing_key=self.__routing_key__(self.account_id))
         await self.queue.bind(exchange=self.exchange, routing_key="all." + str(self.gamespace_id))
@@ -647,11 +648,17 @@ class PartySession(object):
             PartySession.FIELD_PAYLOAD: payload
         })
 
-        self.channel.basic_publish(
-            exchange=self.__exchange__name__(),
-            routing_key=self.__routing_key__(account_id) if account_id else "all." + str(self.gamespace_id),
-            body=body,
-            immediate=True)
+        if self.channel is None:
+            return
+
+        try:
+            self.channel.basic_publish(
+                exchange=self.__exchange__name__(),
+                routing_key=self.__routing_key__(account_id) if account_id else "all." + str(self.gamespace_id),
+                body=body,
+                immediate=True)
+        except ChannelClosed:
+            pass
 
     async def close(self, code, reason):
         await self.release(remove_member=False)
@@ -671,20 +678,19 @@ class PartySession(object):
                 "profile": self.member_profile
             })
 
-        if self.queue:
+        if self.consumer:
             try:
-                await self.queue.delete()
+                await self.consumer.cancel()
             except Exception:
-                logging.exception("Failed to delete the queue")
-
-        if self.exchange:
-            try:
-                await self.exchange.delete(if_unused=True)
-            except Exception:
-                logging.exception("Failed to delete the exchange")
+                pass
 
         if self.channel:
-            self.broker.release_channel(self.channel)
+            try:
+                self.channel.close()
+            except ChannelClosed:
+                pass
+            except Exception:
+                logging.exception("Failed to close the channel")
 
         if (not self.done) and remove_member and self.is_joined:
             await self.parties.__remove_party_member__(
