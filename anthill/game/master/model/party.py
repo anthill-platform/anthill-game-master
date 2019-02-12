@@ -574,7 +574,7 @@ class PartySession(object):
                 await db.commit()
 
     async def init(self, members=None):
-        self.channel = await self.broker.channel()
+        self.channel = await self.broker.acquire_channel()
         self.exchange = await self.channel.exchange(
             exchange=self.__exchange__name__(),
             exchange_type='topic',
@@ -684,12 +684,7 @@ class PartySession(object):
                 logging.exception("Failed to delete the exchange")
 
         if self.channel:
-            try:
-                self.channel.close()
-            except ChannelClosed:
-                pass
-            except Exception:
-                logging.exception("Failed to close the channel")
+            self.broker.release_channel(self.channel)
 
         if (not self.done) and remove_member and self.is_joined:
             await self.parties.__remove_party_member__(
