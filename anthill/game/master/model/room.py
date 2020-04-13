@@ -257,9 +257,9 @@ class RoomQuery(object):
                 items = zip(items, *adapters)
 
             if count:
-                return (items, count_result)
+                return (list(items), count_result)
 
-            return items
+            return list(items)
 
 
 class RoomsModel(Model):
