@@ -106,19 +106,16 @@ if os.name == "nt":
     # Windows
     define("deployments_location",
            default="C:/Anthill/game-master-deployments",
-           help="A limit for room creation for user tuple: (amount, time)",
+           help="Path where all deployments are stored. If you have several instances of Game Master service, "
+                "make sure this location is accessible from all instances (e.g. on a nfs).",
            type=str)
 else:
     # Unix
     define("deployments_location",
            default="/usr/local/anthill/game-master-deployments",
-           help="A limit for room creation for user tuple: (amount, time)",
+           help="Path where all deployments are stored. If you have several instances of Game Master service, "
+                "make sure this location is accessible from all instances (e.g. on a nfs).",
            type=str)
-
-define("heartbeat_time",
-       default=30,
-       help="Heartbeat periods (how ofter to check controllers)",
-       type=int)
 
 # Rabbitmq
 

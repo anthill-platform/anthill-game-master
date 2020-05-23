@@ -5,6 +5,7 @@ from anthill.common.model import Model
 from anthill.common.internal import Internal, InternalError
 from anthill.common.discover import DiscoveryError
 from anthill.common.validate import validate
+from anthill.common.jsonrpc import JsonRPCTimeout, JsonRPCError, JSONRPC_TIMEOUT
 from anthill.common import random_string, database, discover
 
 from .gameserver import GameServerAdapter
@@ -87,6 +88,7 @@ class HostsPlayersCountAdapter(object):
         self.host_load = data.get("host_load")
         self.host_memory = data.get("host_memory")
         self.host_cpu = data.get("host_cpu")
+        self.host_storage = data.get("host_storage")
 
 
 class RoomQuery(object):
@@ -299,6 +301,8 @@ class RoomsModel(Model):
         else:
             self.monitoring_report_callback = None
 
+        self.rpc = app.rpc.acquire_rpc("game_master")
+
     async def __update_monitoring_status__(self):
         players_count = await self.get_players_count()
         players_count_per_host = await self.list_players_count_per_host()
@@ -315,6 +319,7 @@ class RoomsModel(Model):
                     "load": host.host_load,
                     "memory": host.host_memory,
                     "cpu": host.host_cpu,
+                    "storage": host.host_storage,
                 },
                 host_name=host.host_name,
                 host_id=host.host_id)
@@ -941,7 +946,7 @@ class RoomsModel(Model):
                 settings["discover"] = services
 
     async def instantiate(self, gamespace, game_id, game_version, game_server_name,
-                          deployment_id, room_id, server_host, game_settings, server_settings,
+                          deployment_id, room_id, host, game_settings, server_settings,
                           room_settings, other_settings=None):
 
         await self.prepare(gamespace, game_settings)
@@ -956,20 +961,16 @@ class RoomsModel(Model):
             settings["other"] = other_settings
 
         try:
-            result = await self.internal.post(
-                server_host, "spawn",
-                {
-                    "game_id": game_id,
-                    "game_version": game_version,
-                    "game_server_name": game_server_name,
-                    "room_id": room_id,
-                    "gamespace": gamespace,
-                    "deployment": deployment_id,
-                    "settings": ujson.dumps(settings)
-                }, discover_service=False, timeout=60)
-
-        except InternalError as e:
-            raise RoomError("Failed to spawn a new game server: " + str(e.code) + " " + e.body)
+            result = await self.rpc.send_mq_request(
+                "game_host_{0}".format(host.host_id),
+                "spawn", JSONRPC_TIMEOUT, game_name=game_id, game_version=game_version,
+                game_server_name=game_server_name,
+                room_id=room_id, gamespace=gamespace, deployment=deployment_id,
+                settings=settings)
+        except JsonRPCTimeout as e:
+            raise RoomError("Failed to spawn a new game server (timeout)")
+        except JsonRPCError as e:
+            raise RoomError("Failed to spawn a new game server: " + str(e.code) + " " + e.message)
 
         return result
 
@@ -1157,23 +1158,14 @@ class RoomsModel(Model):
             except HostNotFound:
                 raise RoomError("Failed to get host, not found: " + room.host_id)
 
-        server_host = host.internal_location
-
         try:
-            await self.internal.post(
-                server_host, "terminate",
-                {
-                    "room_id": room_id,
-                    "gamespace": gamespace
-                }, discover_service=False, timeout=10)
-
-        except InternalError as e:
-            if e.code == 599:
-                pass
-            elif e.code == 404:
-                pass
-            else:
-                raise RoomError("Failed to terminate a room: " + str(e.code) + " " + e.body)
+            await self.rpc.send_mq_request(
+                "game_host_{0}".format(host.host_id),
+                "terminate_room", JSONRPC_TIMEOUT, room_id=room_id)
+        except JsonRPCTimeout as e:
+            raise RoomError("Failed to terminate a room: timeout")
+        except JsonRPCError as e:
+            raise RoomError("Failed to terminate a room: " + str(e.code) + " " + e.message)
 
         await self.remove_room(gamespace, room_id)
 
@@ -1188,19 +1180,14 @@ class RoomsModel(Model):
             except HostNotFound:
                 raise RoomError("Failed to get host, not found: " + room.host_id)
 
-        server_host = host.internal_location
-
         try:
-            await self.internal.post(
-                server_host, "execute_stdin",
-                {
-                    "room_id": room_id,
-                    "command": command,
-                    "gamespace": gamespace
-                }, discover_service=False, timeout=10)
-
-        except InternalError as e:
-            raise RoomError("Failed to execute a command: " + str(e.code) + " " + e.body)
+            await self.rpc.send_mq_request(
+                "game_host_{0}".format(host.host_id),
+                "execute_stdin", JSONRPC_TIMEOUT, room_id=room_id, command=command)
+        except JsonRPCTimeout as e:
+            raise RoomError("Failed to execute a command: timeout")
+        except JsonRPCError as e:
+            raise RoomError("Failed to execute a command: " + str(e.code) + " " + e.message)
 
     async def remove_host_rooms(self, host_id, except_rooms=None):
         try:
@@ -1261,7 +1248,7 @@ class RoomsModel(Model):
 
         result = await self.instantiate(
             gamespace, game_id, game_version, game_server_name,
-            deployment_id, room_id, host.internal_location,
+            deployment_id, room_id, host,
             game_settings, server_settings, room_settings, other_settings)
 
         if "location" not in result:

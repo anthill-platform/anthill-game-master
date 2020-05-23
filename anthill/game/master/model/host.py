@@ -34,14 +34,14 @@ class HostAdapter(object):
     def __init__(self, data):
         self.host_id = str(data.get("host_id"))
         self.region_id = str(data.get("host_region"))
-        self.name = data.get("host_name")
-        self.internal_location = data.get("internal_location")
+        self.address = data.get("host_address")
         self.region = data.get("host_region")
         self.enabled = data.get("host_enabled", 0) == 1
 
         self.memory = int(data.get("host_memory"))
         self.heartbeat = data.get("host_heartbeat")
         self.cpu = int(data.get("host_cpu"))
+        self.storage = int(data.get("host_storage"))
         self.load = int(data.get("host_load", 0) * 100.0)
 
         self.state = data.get("host_state", "ERROR")
@@ -69,15 +69,6 @@ class HostsModel(Model):
 
     async def setup_table_regions(self):
         await self.new_region("local", True, {})
-
-    async def setup_table_hosts(self):
-
-        try:
-            region = await self.find_region("local")
-        except RegionNotFound:
-            pass
-        else:
-            await self.new_host("localhost", "http://localhost:9509", region.region_id, True)
 
     @validate(name="str_name", default="bool", settings="json")
     async def new_region(self, name, default, settings):
@@ -265,34 +256,34 @@ class HostsModel(Model):
         except database.DatabaseError as e:
             raise RegionError("Failed to delete a region: " + e.args[1])
 
-    async def new_host(self, name, internal_location, region, enabled=True):
+    async def new_host(self, address, region, enabled=True):
 
         try:
             host_id = await self.db.insert(
                 """
                 INSERT INTO `hosts`
-                (`host_name`, `internal_location`, `host_region`,  `host_enabled`)
-                VALUES (%s, %s, %s, %s)
-                """, name, internal_location, region, int(bool(enabled))
+                (`host_address`, `host_region`, `host_enabled`)
+                VALUES (%s, %s, %s)
+                """, address, region, int(bool(enabled))
             )
         except database.DatabaseError as e:
             raise HostError("Failed to create a host: " + e.args[1])
         else:
             return host_id
 
-    async def update_host(self, host_id, name, internal_location, enabled):
+    async def update_host(self, host_id, enabled):
         try:
             await self.db.execute(
                 """
                 UPDATE `hosts`
-                SET `host_name`=%s, `internal_location`=%s, `host_enabled`=%s
+                SET `host_enabled`=%s
                 WHERE `host_id`=%s
-                """, name, internal_location, int(bool(enabled)), host_id
+                """, int(bool(enabled)), host_id
             )
         except database.DatabaseError as e:
             raise HostError("Failed to update host: " + e.args[1])
 
-    async def update_host_load(self, host_id, memory, cpu, state='ACTIVE', db=None):
+    async def update_host_load(self, host_id, memory, cpu, storage, state='ACTIVE', db=None):
 
         total_load = max(memory, cpu) / 100.0
 
@@ -300,23 +291,35 @@ class HostsModel(Model):
             await (db or self.db).execute(
                 """
                 UPDATE `hosts`
-                SET `host_load`=%s, `host_memory`=%s, `host_cpu`=%s, `host_state`=%s,
+                SET `host_load`=%s, `host_memory`=%s, `host_cpu`=%s, `host_storage`=%s, `host_state`=%s,
                     `host_heartbeat`=NOW(),
                     `host_processing`=0
                 WHERE `host_id`=%s
-                """, total_load, memory, cpu, state, host_id)
+                """, total_load, memory, cpu, storage, state, host_id)
         except database.DatabaseError as e:
             raise HostError("Failed to update host load: " + e.args[1])
 
-    async def find_host(self, host_name):
+    async def update_host_state(self, host_id, state, db=None):
+
+        try:
+            await (db or self.db).execute(
+                """
+                UPDATE `hosts`
+                SET `host_state`=%s, `host_processing`=0
+                WHERE `host_id`=%s
+                """, state, host_id)
+        except database.DatabaseError as e:
+            raise HostError("Failed to update host state: " + e.args[1])
+
+    async def find_host(self, host_address):
         try:
             host = await self.db.get(
                 """
                 SELECT *
                 FROM `hosts`
-                WHERE `host_name`=%s
+                WHERE `host_address`=%s
                 LIMIT 1;
-                """, host_name
+                """, host_address
             )
         except database.DatabaseError as e:
             raise HostError("Failed to get server: " + e.args[1])

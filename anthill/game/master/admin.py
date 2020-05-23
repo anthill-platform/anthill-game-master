@@ -1,20 +1,21 @@
-
 from tornado.gen import multi
 from tornado.ioloop import IOLoop
 import tornado.httpclient
 
 import anthill.common.admin as a
 from anthill.common import run_on_executor
+from anthill.common.server import Server
 from anthill.common.environment import EnvironmentClient, AppNotFound
 from anthill.common.database import format_conditions_json, ConditionError
-from anthill.common.validate import validate
+from anthill.common.validate import validate, ValidationError
+from anthill.common.jsonrpc import JsonRPCError, JSONRPC_TIMEOUT
 
-from . model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
-from . model.host import HostNotFound, HostError, RegionNotFound, RegionError
-from . model.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
-from . model.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
-from . model.ban import NoSuchBan, BanError, UserAlreadyBanned
-from . model.room import RoomQuery, RoomNotFound, RoomError
+from .model.gameserver import GameError, GameServerNotFound, GameVersionNotFound, GameServersModel, GameServerExists
+from .model.host import HostNotFound, HostError, RegionNotFound, RegionError
+from .model.deploy import DeploymentError, DeploymentNotFound, NoCurrentDeployment, DeploymentAdapter
+from .model.deploy import DeploymentDeliveryError, DeploymentDeliveryAdapter
+from .model.ban import NoSuchBan, BanError, UserAlreadyBanned
+from .model.room import RoomQuery, RoomNotFound, RoomError
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -660,7 +661,7 @@ class ApplicationVersionController(a.AdminController):
                         a.button("app_version", "Delete", "danger", _method="delete_deployment",
                                  game_name=self.context.get("app_id"),
                                  game_version=self.context.get("version_id"),
-                                 deployment_id=item.deployment_id)]\
+                                 deployment_id=item.deployment_id)] \
                     if (current_deployment != item.deployment_id) else "Current deployment"
             return []
 
@@ -737,61 +738,29 @@ class Delivery(object):
         self.gamespace = gamespace
 
     async def __deliver_host__(self, game_name, game_version, deployment_id, delivery_id, host, deployment_hash):
-        client = tornado.httpclient.AsyncHTTPClient()
         deployments = self.application.deployments
-        location = deployments.deployments_location
-
-        deployment_path = os.path.join(location, game_name, game_version, deployment_id + ".zip")
+        rpc = self.application.rpc.acquire_rpc("admin")
 
         try:
-            f = open(deployment_path, "rb")
+            result = await rpc.send_mq_request(
+                "game_host_{0}".format(host.host_id),
+                "deploy_delivery", 600, game_name, game_version, deployment_id, deployment_hash)
         except Exception as e:
             await deployments.update_deployment_delivery_status(
-                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR,
-                str(e))
-
+                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR, "Cannot deliver")
+            logging.exception("Cannot deliver")
             raise DeploymentDeliveryError(str(e))
 
-        try:
-            async def producer(write):
-                while True:
-                    data = f.read(8192)
-                    if not data:
-                        break
-                    await write(data)
-
-            request = tornado.httpclient.HTTPRequest(
-                url=host.internal_location + "/game/{0}/{1}/deployments/{2}/deliver?{3}".format(
-                    game_name,
-                    game_version,
-                    deployment_id,
-                    parse.urlencode({
-                        "deployment_hash": deployment_hash
-                    })),
-                method="PUT",
-                request_timeout=2400,
-                body_producer=producer
-            )
-
-            await client.fetch(request)
-
-        except Exception as e:
+        if result:
             await deployments.update_deployment_delivery_status(
-                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR,
-                str(e))
+                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELIVERED)
+        else:
+            await deployments.update_deployment_delivery_status(
+                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR, "Cannot deliver")
 
-            raise DeploymentDeliveryError(str(e))
-        finally:
-            try:
-                f.close()
-            except Exception:
-                pass
-
-        await deployments.update_deployment_delivery_status(
-            self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELIVERED)
+            raise DeploymentDeliveryError("Cannot deliver")
 
     async def __deliver_upload__(self, game_name, game_version, deployment_id, deliver_list, deployment_hash):
-
         deployments = self.application.deployments
 
         tasks = [
@@ -814,29 +783,29 @@ class Delivery(object):
             return True
 
     async def __deliver_clean_host__(self, game_name, game_version, deployment_id, delivery_id, host):
-        client = tornado.httpclient.AsyncHTTPClient()
         deployments = self.application.deployments
 
         await deployments.update_deployment_delivery_status(
             self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELETING)
 
+        deployments = self.application.deployments
+        rpc = self.application.rpc.acquire_rpc("admin")
+
         try:
-            request = tornado.httpclient.HTTPRequest(
-                url=host.internal_location + "/game/{0}/{1}/deployments/{2}".format(
-                    game_name,
-                    game_version,
-                    deployment_id),
-                method="DELETE",
-                request_timeout=2400
-            )
-            await client.fetch(request)
+            result = await rpc.send_mq_request(
+                "game_host_{0}".format(host.host_id),
+                "delete_delivery", JSONRPC_TIMEOUT, game_name, game_version, deployment_id)
         except Exception as e:
             await deployments.update_deployment_delivery_status(
                 self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_ERROR, str(e))
             raise DeploymentDeliveryError(str(e))
 
-        await deployments.update_deployment_delivery_status(
-            self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELETED)
+        if result:
+            await deployments.update_deployment_delivery_status(
+                self.gamespace, delivery_id, DeploymentDeliveryAdapter.STATUS_DELETED)
+        else:
+            await deployments.update_deployment_delivery_status(
+                self.gamespace, deployment_id, DeploymentDeliveryAdapter.STATUS_ERROR)
 
     async def __deliver__(self, game_name, game_version, deployment_id, deployment_hash, wait_for_deliver=False):
         hosts = self.application.hosts
@@ -1009,40 +978,34 @@ class ApplicationDeploymentController(a.AdminController):
 
             a.content("Host delivery status", [
                 {
-                    "id": "host_name",
-                    "title": "Host Name"
-                },
-                {
-                    "id": "host_location",
-                    "title": "Host Location"
+                    "id": "host_address",
+                    "title": "Host Address"
                 },
                 {
                     "id": "delivery_status",
                     "title": "Delivery status"
                 },
             ], [
+                  {
+                      "host_address": data["hosts"][item.host_id].address if item.host_id in data[
+                          "hosts"] else "Unknown",
+                      "delivery_status": [
                           {
-                              "host_name": data["hosts"][item.host_id].name if item.host_id in data[
-                                  "hosts"] else "Unknown",
-                              "host_location": data["hosts"][item.host_id].internal_location
-                              if item.host_id in data["hosts"] else "Unknown",
-                              "delivery_status": [
-                                  {
-                                      DeploymentDeliveryAdapter.STATUS_DELIVERING:
-                                          a.status("Delivering", "info", "refresh fa-spin"),
-                                      DeploymentDeliveryAdapter.STATUS_DELIVERED:
-                                          a.status("Delivered", "success", "check"),
-                                      DeploymentDeliveryAdapter.STATUS_DELETING:
-                                          a.status("Deleting", "info", "refresh fa-spin"),
-                                      DeploymentDeliveryAdapter.STATUS_DELETED:
-                                          a.status("Deleted", "default", "times"),
-                                      DeploymentDeliveryAdapter.STATUS_ERROR:
-                                          a.status("Error: " + item.error_reason, "danger", "exclamation-triangle")
-                                  }.get(item.status, a.status(item.status, "default", "refresh")),
-                              ]
-                          }
-                          for item in data["deliveries"]
-                      ], "primary"),
+                              DeploymentDeliveryAdapter.STATUS_DELIVERING:
+                                  a.status("Delivering", "info", "refresh fa-spin"),
+                              DeploymentDeliveryAdapter.STATUS_DELIVERED:
+                                  a.status("Delivered", "success", "check"),
+                              DeploymentDeliveryAdapter.STATUS_DELETING:
+                                  a.status("Deleting", "info", "refresh fa-spin"),
+                              DeploymentDeliveryAdapter.STATUS_DELETED:
+                                  a.status("Deleted", "default", "times"),
+                              DeploymentDeliveryAdapter.STATUS_ERROR:
+                                  a.status("Error: " + item.error_reason, "danger", "exclamation-triangle")
+                          }.get(item.status, a.status(item.status, "default", "refresh")),
+                      ]
+                  }
+                  for item in data["deliveries"]
+              ], "primary"),
 
             a.links("Navigate", [
                 a.link("app_version", "Go back", icon="chevron-left",
@@ -1265,10 +1228,14 @@ class DeployApplicationController(a.UploadAdminController):
 
 
 class DebugControllerAction(a.StreamAdminController):
-    """
-    Debug controller action that does nothing except redirecting to the required game controller
-    debug action
-    """
+    def __init__(self, app, token, handler):
+        super().__init__(app, token, handler)
+
+        self.host_id = None
+        self.host_address = None
+        self.rpc = self.application.rpc.acquire_rpc("admin")
+        self.session_id = None
+        self.sub = None
 
     async def prepared(self, server, **ignored):
         hosts = self.application.hosts
@@ -1278,7 +1245,65 @@ class DebugControllerAction(a.StreamAdminController):
         except HostNotFound as e:
             raise a.ActionError("Server not found: " + str(server))
 
-        raise a.RedirectStream("debug", host.internal_location)
+        self.host_id = host.host_id
+        self.host_address = host.address
+
+    async def on_opened(self, *args, **kwargs):
+        self.sub = await Server.acquire_custom_subscriber("game_host_debug_{0}".format(self.host_id), round_robin=False)
+        await self.sub.handle("host_global_debug_action", self._on_receive_debug_action, routing_key=str(self.host_id))
+
+        self.session_id = await self.rpc.send_mq_request(
+            "game_host_{0}".format(self.host_id), "debug_open", JSONRPC_TIMEOUT)
+
+        await self.sub.handle("host_session_debug_action", self._on_receive_debug_action, routing_key=self.session_id)
+
+        servers = await self.rpc.send_mq_request(
+            "game_host_{0}".format(self.host_id), "debug_command",
+            JSONRPC_TIMEOUT, session_id=self.session_id, debug_command="get_servers")
+
+        if servers is not None:
+            await self.send_rpc(self, "servers", servers)
+
+    async def _on_receive_debug_action(self, payload):
+        """
+        Host controller sent an action to the websocket client
+        host controller -> host handler -> [websocket client]
+        """
+        kind = payload.pop("kind")
+        if kind == "debug_action":
+            logging.info("Received debug action: {0}".format(ujson.dumps(payload)))
+            debug_action = payload.pop("debug_action")
+            kwargs = payload.pop("kwargs")
+            await self.send_rpc(self, debug_action, **kwargs)
+
+    async def on_closed(self):
+        if self.sub:
+            await self.sub.release()
+            self.sub = None
+        if self.rpc:
+            await self.rpc.send_mq_rpc(
+                "game_host_{0}".format(self.host_id), "debug_close", self.session_id)
+
+    async def command_received(self, context, method, **kwargs):
+        """
+        A websocket command received from a client that debugs this host
+        [websocket client] -> host handler -> host controller
+        """
+        try:
+            response = await self.rpc.send_mq_request(
+                "game_host_{0}".format(self.host_id), "debug_command", JSONRPC_TIMEOUT,
+                session_id=self.session_id, debug_command=method, **kwargs)
+
+        except TypeError as e:
+            raise JsonRPCError(400, "Bad arguments: " + e.args[0])
+        except a.StreamCommandError as e:
+            raise JsonRPCError(e.code, e.message)
+        except ValidationError as e:
+            raise JsonRPCError(400, e.message)
+        except Exception as e:
+            raise JsonRPCError(500, "Error: " + str(e))
+
+        return response
 
 
 class DebugHostController(a.AdminController):
@@ -1307,7 +1332,7 @@ class DebugHostController(a.AdminController):
         return [
             a.breadcrumbs([
                 a.link("region", data["region"].name, region_id=data["region"].region_id),
-                a.link("host", data["host"].name,
+                a.link("host", data["host"].address,
                        host_id=self.context.get("host_id"))
             ], "Debug"),
             a.script(self.application.module_path("static/admin/debug_controller.js"),
@@ -1315,65 +1340,6 @@ class DebugHostController(a.AdminController):
                      room=self.context.get("room_id")),
             a.links("Navigate", [
                 a.link("server", "Go back", icon="chevron-left", host_id=self.context.get("host_id"))
-            ])
-        ]
-
-    def access_scopes(self):
-        return ["game_admin"]
-
-
-class NewHostController(a.AdminController):
-    async def create(self, name, internal_location):
-        hosts = self.application.hosts
-
-        region_id = self.context.get("region_id")
-
-        try:
-            await hosts.get_region(region_id)
-        except RegionNotFound:
-            raise a.ActionError("Region not found")
-        except RegionError as e:
-            raise a.ActionError(str(e))
-
-        try:
-            host_id = await hosts.new_host(name, internal_location, region_id)
-        except HostError as e:
-            raise a.ActionError("Failed to create new host: " + str(e))
-
-        raise a.Redirect(
-            "host",
-            message="New host has been created",
-            host_id=host_id)
-
-    async def get(self, region_id):
-
-        hosts = self.application.hosts
-
-        try:
-            region = await hosts.get_region(region_id)
-        except RegionNotFound:
-            raise a.ActionError("Region not found")
-        except RegionError as e:
-            raise a.ActionError(str(e))
-
-        return {
-            "region": region
-        }
-
-    def render(self, data):
-        return [
-            a.breadcrumbs([
-                a.link("region", data["region"].name, region_id=data["region"].region_id),
-            ], "New host"),
-            a.form("New host", fields={
-                "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "internal_location":
-                    a.field("Internal location (including scheme)", "text", "primary", "non-empty", order=2)
-            }, methods={
-                "create": a.method("Create", "primary")
-            }, data=data),
-            a.links("Navigate", [
-                a.link("@back", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -1439,6 +1405,8 @@ class HostController(a.AdminController):
 
         await hosts.delete_host(host_id)
 
+        await self.application.rpc.acquire_rpc("admin").send_mq_rpc("game_host_{0}".format(host_id), "shutdown")
+
         raise a.Redirect(
             "region",
             message="Host has been deleted",
@@ -1460,10 +1428,9 @@ class HostController(a.AdminController):
             raise a.ActionError(str(e))
 
         result = {
-            "name": host.name,
+            "address": host.address,
             "host": host,
             "region": region,
-            "internal_location": host.internal_location,
             "host_enabled": "true" if host.enabled else "false"
         }
 
@@ -1476,7 +1443,7 @@ class HostController(a.AdminController):
         return [
             a.breadcrumbs([
                 a.link("region", data["region"].name, region_id=data["region"].region_id),
-            ], data["name"]),
+            ], data["address"]),
             a.links("Debug", [
                 a.link("debug_host", "Debug this host", icon="bug", host_id=self.context.get("host_id")),
             ]),
@@ -1486,29 +1453,26 @@ class HostController(a.AdminController):
                 MEMORY: <b>{2}%</b><br>
                 Last heartbeat check: <b>{3}</b>
             """.format(host.state, host.cpu, host.memory, str(host.heartbeat))),
-            a.form("Host '{0}' information".format(data["name"]), fields={
-                "host_enabled": a.field("Enabled (can accept players)", "switch", "primary", order=0),
-                "name": a.field("Host name", "text", "primary", "non-empty", order=1),
-                "internal_location": a.field("Internal location (including scheme)", "text", "primary", "non-empty",
-                                             order=3)
+            a.form("Host '{0}' information".format(data["address"]), fields={
+                "host_enabled": a.field("Enabled (can accept players)", "switch", "primary", order=0)
             }, methods={
                 "update": a.method("Update", "primary", order=1),
-                "delete": a.method("Delete", "danger", order=2)
+                "delete": a.method("Delete", "danger", order=2,
+                                   danger="Deleting this host will result in permanent shutdown on remote host, "
+                                          "that can be fixed only by manually restarting it.")
             }, data=data)
         ]
 
     def access_scopes(self):
         return ["game_admin"]
 
-    async def update(self, name, internal_location, host_enabled="false"):
+    async def update(self, host_enabled="false"):
         host_id = self.context.get("host_id")
         hosts = self.application.hosts
 
         try:
             await hosts.update_host(
                 host_id,
-                name,
-                internal_location,
                 host_enabled == "true")
         except HostError as e:
             raise a.ActionError("Failed to update host: " + str(e))
@@ -1795,8 +1759,8 @@ class RegionController(a.AdminController):
 
             a.content("Hosts", [
                 {
-                    "id": "name",
-                    "title": "Host Name"
+                    "id": "address",
+                    "title": "Host Address"
                 },
                 {
                     "id": "status",
@@ -1815,28 +1779,38 @@ class RegionController(a.AdminController):
                     "title": "Memory Load"
                 },
                 {
+                    "id": "storage",
+                    "title": "Storage Usage"
+                },
+                {
                     "id": "heartbeat",
                     "title": "Last Check"
+                },
+                {
+                    "id": "debug",
+                    "title": "Debug"
                 }
             ], [
-                          {
-                              "name": [
-                                  a.link("host", host.name,
-                                         icon="thermometer-{0}".format(min(int(host.load / 20), 4)),
-                                         host_id=host.host_id)
-                              ],
-                              "enabled": [
-                                  a.status(
-                                      "Yes" if host.enabled else "No",
-                                      "success" if host.enabled else "danger")],
-                              "cpu": "{0} %".format(host.cpu) if host.active else "-",
-                              "memory": "{0} %".format(host.memory) if host.active else "-",
-                              "status": [
-                                  a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
-                              "heartbeat": str(host.heartbeat)
-                          }
-                          for host in data["hosts"]
-                      ], "primary", empty="No hosts to display"),
+                  {
+                      "address": [
+                          a.link("host", host.address,
+                                 icon="thermometer-{0}".format(min(int(host.load / 20), 4)),
+                                 host_id=host.host_id)
+                      ],
+                      "enabled": [
+                          a.status(
+                              "Yes" if host.enabled else "No",
+                              "success" if host.enabled else "danger")],
+                      "cpu": "{0} %".format(host.cpu) if host.active else "-",
+                      "memory": "{0} %".format(host.memory) if host.active else "-",
+                      "storage": "{0} %".format(host.storage) if host.active else "-",
+                      "status": [
+                          a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
+                      "heartbeat": str(host.heartbeat),
+                      "debug": [a.link("debug_host", "", icon="bug", host_id=host.host_id)]
+                  }
+                  for host in data["hosts"]
+              ], "primary", empty="No hosts to display"),
 
             a.form("Region '{0}' information".format(data["name"]), fields={
                 "name": a.field("Region name", "text", "primary", "non-empty", order=1),
@@ -1855,9 +1829,7 @@ class RegionController(a.AdminController):
                 "update_geo": a.method("Update", "primary", order=1)
             }, data=data),
             a.links("Navigate", [
-                a.link("hosts", "Go back", icon="chevron-left"),
-                a.link("new_host", "New host", "plus",
-                       region_id=self.context.get("region_id"))
+                a.link("hosts", "Go back", icon="chevron-left")
             ])
         ]
 
@@ -2226,12 +2198,12 @@ class RoomsController(a.AdminController):
     ROOMS_PER_PAGE = 20
 
     async def get(self, game_name, page=1,
-            game_version=None,
-            game_server=None,
-            game_deployment=None,
-            game_settings=None,
-            game_region=None,
-            game_host=None):
+                  game_version=None,
+                  game_server=None,
+                  game_deployment=None,
+                  game_settings=None,
+                  game_region=None,
+                  game_host=None):
 
         environment_client = EnvironmentClient(self.application.cache)
         gameservers = self.application.gameservers
@@ -2292,7 +2264,7 @@ class RoomsController(a.AdminController):
             raise a.ActionError(str(e))
 
         game_hosts = {
-            host.host_id: host.name
+            host.host_id: host.address
             for host in game_hosts
         }
 
@@ -2471,7 +2443,7 @@ class RoomsController(a.AdminController):
                                       game_version=room.game_version)],
                 "players": str(room.players) + " / " + str(room.max_players),
                 "region": [a.link("region", region.name, icon="globe", region_id=region.region_id)],
-                "host": [a.link("host", host.name, icon="server", host_id=host.host_id)],
+                "host": [a.link("host", host.address, icon="server", host_id=host.host_id)],
                 "debug": [a.link("debug_host", "", icon="bug", host_id=host.host_id, room_id=room.room_id)],
                 "settings": [a.json_view(room.room_settings)],
             }
@@ -2583,59 +2555,68 @@ class HostsController(a.AdminController):
         return [
             a.breadcrumbs([], "Full Host List"),
 
-            a.content("Hosts", [
-                {
-                    "id": "region",
-                    "title": "Region"
-                },
-                {
-                    "id": "name",
-                    "title": "Host Name"
-                },
-                {
-                    "id": "status",
-                    "title": "Status"
-                },
-                {
-                    "id": "enabled",
-                    "title": "Enabled"
-                },
-                {
-                    "id": "cpu",
-                    "title": "CPU Load"
-                },
-                {
-                    "id": "memory",
-                    "title": "Memory Load"
-                },
-                {
-                    "id": "heartbeat",
-                    "title": "Last Check"
-                }
-            ], [
-                          {
-                              "region": [
-                                  a.link("region",
-                                         regions[host.region_id].name if host.region_id in regions else "Unknown",
-                                         icon="globe", region_id=host.region_id)
-                              ],
-                              "name": [
-                                  a.link("host", host.name,
-                                         icon="thermometer-{0}".format(min(int(host.load / 20), 4)),
-                                         host_id=host.host_id)
-                              ],
-                              "enabled": [
-                                  a.status(
-                                      "Yes" if host.enabled else "No",
-                                      "success" if host.enabled else "danger")],
-                              "cpu": "{0} %".format(host.cpu) if host.active else "-",
-                              "memory": "{0} %".format(host.memory) if host.active else "-",
-                              "status": [
-                                  a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
-                              "heartbeat": str(host.heartbeat)
-                          }
-                          for host in data["hosts"]
-                      ], "primary", empty="No hosts to display"),
+            a.content(
+                "Hosts",
+                [
+                    {
+                        "id": "region",
+                        "title": "Region"
+                    },
+                    {
+                        "id": "address",
+                        "title": "Host Address"
+                    },
+                    {
+                        "id": "status",
+                        "title": "Status"
+                    },
+                    {
+                        "id": "enabled",
+                        "title": "Enabled"
+                    },
+                    {
+                        "id": "cpu",
+                        "title": "CPU Load"
+                    },
+                    {
+                        "id": "memory",
+                        "title": "Memory Load"
+                    },
+                    {
+                        "id": "storage",
+                        "title": "Storage Usage"
+                    },
+                    {
+                        "id": "heartbeat",
+                        "title": "Last Check"
+                    },
+                    {
+                        "id": "debug",
+                        "title": "Debug Host"
+                    }
+                ],
+                [
+                    {
+                        "region": [
+                            a.link("region",
+                                   regions[host.region_id].name if host.region_id in regions else "Unknown",
+                                   icon="globe", region_id=host.region_id)
+                        ],
+                        "address": host.address,
+                        "enabled": [
+                            a.status(
+                                "Yes" if host.enabled else "No",
+                                "success" if host.enabled else "danger")],
+                        "cpu": "{0} %".format(host.cpu) if host.active else "-",
+                        "memory": "{0} %".format(host.memory) if host.active else "-",
+                        "storage": "{0} %".format(host.storage) if host.active else "-",
+                        "status": [
+                            a.status(host.state, "success") if host.active else a.status(host.state, "danger")],
+                        "heartbeat": str(host.heartbeat),
+                        "debug": [a.link("debug_host", "", icon="bug", host_id=host.host_id)],
+                    }
+                    for host in data["hosts"]
+                ], "primary", empty="No hosts to display"),
 
             a.links("Navigate", [
                 a.link("index", "Go back", icon="chevron-left")

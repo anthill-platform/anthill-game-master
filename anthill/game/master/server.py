@@ -1,4 +1,3 @@
-
 from anthill.common import database, keyvalue, server, ratelimit, access
 from anthill.common.options import options
 
@@ -6,14 +5,14 @@ from . import admin
 from . import handlers as h
 from . import options as _opts
 
-from . model.gameserver import GameServersModel
-from . model.room import RoomsModel
-from . model.controller import ControllersClientModel
-from . model.host import HostsModel
-from . model.deploy import DeploymentModel
-from . model.ban import BansModel
-from . model.heartbeat import HeartbeatModel
-from . model.party import PartyModel
+from .model.gameserver import GameServersModel
+from .model.room import RoomsModel
+from .model.controller import ControllersClientModel
+from .model.host import HostsModel
+from .model.deploy import DeploymentModel
+from .model.ban import BansModel
+from .model.party import PartyModel
+from .model.rpc import GameControllerRPC
 
 
 class GameMasterServer(server.Server):
@@ -33,12 +32,16 @@ class GameMasterServer(server.Server):
             db=options.cache_db,
             max_connections=options.cache_max_connections)
 
+        self.rpc = GameControllerRPC(
+            self, options.internal_broker,
+            options.internal_max_connections,
+            options.internal_channel_prefetch_count)
+
         self.gameservers = GameServersModel(self.db)
         self.hosts = HostsModel(self.db)
         self.rooms = RoomsModel(self, self.db, self.hosts)
         self.deployments = DeploymentModel(self.db)
         self.bans = BansModel(self.db)
-        self.heartbeat = HeartbeatModel(self, self.db)
 
         self.ctl_client = ControllersClientModel(self.rooms, self.deployments)
 
@@ -46,11 +49,12 @@ class GameMasterServer(server.Server):
             "create_room": options.rate_create_room
         })
 
-        self.parties = PartyModel(self.db, self.gameservers, self.deployments,
-                                  self.ratelimit, self.hosts, self.rooms)
+        self.parties = PartyModel(
+            self.db, self.gameservers, self.deployments,
+            self.ratelimit, self.hosts, self.rooms)
 
     def get_models(self):
-        return [self.hosts, self.rooms, self.gameservers, self.deployments, self.bans, self.heartbeat, self.parties]
+        return [self.rpc, self.hosts, self.rooms, self.gameservers, self.deployments, self.bans, self.parties]
 
     def get_admin(self):
         return {
@@ -70,7 +74,6 @@ class GameMasterServer(server.Server):
             "host": admin.HostController,
             "hosts": admin.HostsController,
             "debug_host": admin.DebugHostController,
-            "new_host": admin.NewHostController,
 
             "region": admin.RegionController,
             "new_region": admin.NewRegionController,
@@ -104,6 +107,8 @@ class GameMasterServer(server.Server):
             (r"/join/(.*)/(.*)/(.*)", h.JoinHandler),
             (r"/create/multi/(.*)/(.*)/(.*)", h.CreateMultiHandler),
             (r"/create/(.*)/(.*)/(.*)", h.CreateHandler),
+            (r"/host", h.HostHandler),
+            (r"/deployment/(.*)/(.*)/(.*)", h.HostDeploymentHandler),
             (r"/status", h.StatusHandler),
             (r"/players", h.MultiplePlayersRecordsHandler),
             (r"/player/(.*)", h.PlayerRecordsHandler),

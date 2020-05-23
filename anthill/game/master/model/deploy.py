@@ -1,5 +1,6 @@
 
 from tornado.concurrent import run_on_executor
+from tornado.ioloop import IOLoop
 from concurrent.futures import ThreadPoolExecutor
 
 from anthill.common import database, clamp
@@ -8,6 +9,7 @@ from anthill.common.options import options
 from anthill.common.validate import validate
 
 import os
+import threading
 
 
 class DeploymentError(Exception):
@@ -249,6 +251,40 @@ class DeploymentModel(Model):
             raise DeploymentError("Failed to get deployment: " + e.args[1])
 
         return list(map(DeploymentAdapter, deployments))
+
+    @run_on_executor
+    def __download_deployment_file__(self, ioloop, filename, write_callback):
+        lock = threading.Lock()
+
+        def write_chunk(chunk):
+            write_callback(chunk, lock.release)
+
+        with open(filename, 'rb') as f:
+            while 1:
+                data = f.read(16384)
+                if data:
+                    lock.acquire()
+                    ioloop.add_callback(write_chunk, data)
+                else:
+                    return
+
+    @validate(deployment=DeploymentAdapter)
+    async def download_deployment_file(self, deployment, write_callback):
+        """
+        Starts the process of downloading deployment file for deployment
+        :param deployment: a DeploymentAdapter instance for file in question
+        :param write_callback: a write function of signatuere write_callback(chunk, flushed) which should write the
+                               chunk data to the socket and call flushed when the chunk has been flushed out
+        :return: yields until all contents of the file has been flushed out
+        """
+
+        deployment_path = os.path.join(
+            self.deployments_location,
+            deployment.game_name,
+            deployment.game_version,
+            str(deployment.deployment_id) + ".zip")
+
+        await self.__download_deployment_file__(IOLoop.current(), deployment_path, write_callback)
 
     @run_on_executor
     def __remove_deployment_file__(self, filename):

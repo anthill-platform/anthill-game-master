@@ -1,11 +1,14 @@
 
 from tornado.web import HTTPError
+from tornado.ioloop import PeriodicCallback
 
 from anthill.common.access import scoped, internal, AccessToken, remote_ip
 from anthill.common.handler import AuthenticatedHandler, JsonRPCWSHandler
 from anthill.common.validate import ValidationError
 from anthill.common.internal import InternalError
-from anthill.common.jsonrpc import JsonRPCError, JsonRPCTimeout
+from anthill.common.jsonrpc import JsonRPCError, JsonRPCTimeout, JSONRPC_TIMEOUT
+from anthill.common.server import Server
+from anthill.common import to_int
 
 from . model.host import RegionNotFound, HostNotFound, HostError, RegionError
 from . model.controller import ControllerError
@@ -13,9 +16,11 @@ from . model.player import Player, PlayersGroup, RoomNotFound, PlayerError, Room
 from . model.gameserver import GameServerNotFound
 from . model.party import PartySession, PartyError, NoSuchParty, PartyFlags
 from . model.ban import UserAlreadyBanned, BanError, NoSuchBan
+from . model.deploy import DeploymentError, DeploymentNotFound
 
 import logging
 import ujson
+import traceback
 
 from geoip import geolite2
 
@@ -24,8 +29,8 @@ class InternalHandler(object):
     def __init__(self, application):
         self.application = application
 
-    async def host_heartbeat(self, name, memory, cpu):
-        logging.info("Host '{0}' load updated: {1} memory {2} cpu".format(name, memory, cpu))
+    async def host_heartbeat(self, name, memory, cpu, storage):
+        logging.info("Host '{0}' load updated: {1} memory {2} cpu {3} storage".format(name, memory, cpu, storage))
 
         hosts = self.application.hosts
 
@@ -35,7 +40,7 @@ class InternalHandler(object):
             raise InternalError(404, "Host not found")
 
         try:
-            await hosts.update_host_load(host.host_id, memory, cpu)
+            await hosts.update_host_load(host.host_id, memory, cpu, storage)
         except HostError as e:
             raise InternalError(500, str(e))
 
@@ -1137,3 +1142,194 @@ class FindBanHandler(AuthenticatedHandler):
         self.dumps({
             "ban": ban.dump()
         })
+
+
+class HostDeploymentHandler(AuthenticatedHandler):
+    @scoped(scopes=["game_host"])
+    async def get(self, game_name, game_version, deployment_id):
+        deployments = self.application.deployments
+        gamespace = self.token.get(AccessToken.GAMESPACE)
+
+        try:
+            deployment = await deployments.get_deployment(gamespace, deployment_id)
+        except DeploymentNotFound:
+            raise HTTPError(404, "No such deployment")
+        except DeploymentError as e:
+            raise HTTPError(500, e.message)
+
+        if deployment.game_name != game_name or deployment.game_version != game_version:
+            # that deployment belongs to different game/version
+            raise HTTPError(404, "No such deployment")
+
+        def write_callback(data, flushed):
+            self.write(data)
+            self.flush(callback=flushed)
+
+        await deployments.download_deployment_file(deployment, write_callback)
+
+
+class HeartbeatReport(object):
+    def __init__(self, data):
+        load = data.get("load", {})
+
+        self.memory = to_int(load.get("memory", 999))
+        self.cpu = to_int(load.get("cpu", 999))
+        self.storage = to_int(load.get("storage", 99))
+        self.rooms = data.get("rooms", [])
+
+
+class HostHandler(JsonRPCWSHandler):
+    def __init__(self, application, request, **kwargs):
+        super().__init__(application, request, **kwargs)
+
+        self.host_id = None
+        self.host_address = None
+        self.update_cb = None
+        self.rpc_listener = None
+        self.pub = None
+
+    MEMORY_OVERLOAD = 95
+
+    def required_scopes(self):
+        return ["game_host"]
+
+    def check_origin(self, origin):
+        return True
+
+    async def on_opened(self, *args, **kwargs):
+        region_name = self.get_argument("region")
+        self.host_address = self.get_argument("address")
+
+        try:
+            region = await self.application.hosts.find_region(region_name)
+        except RegionNotFound:
+            raise HTTPError(3404, "No such region")
+
+        try:
+            host = await self.application.hosts.find_host(self.host_address)
+            self.host_id = host.host_id
+        except HostNotFound:
+            self.host_id = await self.application.hosts.new_host(self.host_address, region=region.region_id)
+        except HostError as e:
+            raise HTTPError(3500, str(e))
+
+        self.update_cb = PeriodicCallback(self._check_heartbeat, 30000)
+        self.update_cb.start()
+
+        rpc = self.application.rpc.acquire_rpc("game_host_{0}".format(self.host_id))
+        self.rpc_listener = await rpc.listen(self.__on_rpc_receive__)
+
+        logging.info("Host {0} ({1}) connected".format(self.host_id, self.host_address))
+
+        self.pub = await Server.acquire_custom_publisher("game_host_debug_{0}".format(self.host_id))
+        self.application.monitor_action("game.controller.connected", {"connected": 1}, host=self.host_address)
+
+        await self._check_heartbeat()
+
+    async def on_rpc_shutdown_received(self, *args, **kwargs):
+        logging.info("Shutting down host {0} ({1})".format(self.host_id, self.host_address))
+        await self.send_rpc(self, "shutdown")
+
+    async def on_rpc_spawn_received(self, *args, **kwargs):
+        return await self.send_request(self, "spawn", JSONRPC_TIMEOUT, *args, **kwargs)
+
+    async def on_rpc_terminate_room_received(self, *args, **kwargs):
+        return await self.send_request(self, "terminate_room", JSONRPC_TIMEOUT, *args, **kwargs)
+
+    async def on_rpc_execute_stdin_received(self, *args, **kwargs):
+        return await self.send_request(self, "execute_stdin", JSONRPC_TIMEOUT, *args, **kwargs)
+
+    async def on_rpc_debug_open_received(self, *args, **kwargs):
+        return await self.send_request(self, "debug_open", JSONRPC_TIMEOUT, *args, **kwargs)
+
+    async def on_rpc_debug_close_received(self, session_id, *args, **kwargs):
+        await self.send_request(self, "debug_close", JSONRPC_TIMEOUT, session_id, *args, **kwargs)
+
+    async def on_rpc_debug_command_received(self, session_id=0, debug_command=None, **kwargs):
+        """
+        A websocket client sent a debug client to the host controller
+        websocket client -> [host handler] -> host controller
+        """
+        return await self.send_request(
+            self, "debug_command", JSONRPC_TIMEOUT,
+            session_id=session_id, debug_command=debug_command, **kwargs)
+
+    async def on_rpc_deploy_delivery_received(self, game_name, game_version, deployment_id, deployment_hash):
+        return await self.send_request(
+            self, "deploy_delivery", 600, game_name, game_version, deployment_id, deployment_hash)
+
+    async def on_rpc_delete_delivery_received(self, game_name, game_version, deployment_id):
+        return await self.send_request(
+            self, "delete_delivery", JSONRPC_TIMEOUT, game_name, game_version, deployment_id)
+
+    async def global_debug_action(self, debug_action=None, **kwargs):
+        await self.pub.publish("host_global_debug_action", {
+            "kind": "debug_action",
+            "debug_action": debug_action,
+            "kwargs": kwargs
+        }, routing_key=str(self.host_id))
+
+    async def session_debug_action(self, session_id=None, debug_action=None, **kwargs):
+        await self.pub.publish("host_session_debug_action", {
+            "kind": "debug_action",
+            "debug_action": debug_action,
+            "session_id": session_id,
+            "kwargs": kwargs
+        }, routing_key=str(session_id))
+
+    # noinspection PyUnusedLocal
+    async def __on_rpc_receive__(self, context, method, *args, **kwargs):
+        method_name = "on_rpc_" + method + "_received"
+        if hasattr(self, method_name):
+
+            # noinspection PyBroadException
+            try:
+                result = await getattr(self, method_name)(*args, **kwargs)
+            except Exception:
+                raise JsonRPCError(-32603, traceback.format_exc())
+            else:
+                return result
+        else:
+            raise JsonRPCError(-32600, "No such method")
+
+    # noinspection PyBroadException
+    async def _check_heartbeat(self):
+        try:
+            # process hosts one by one
+            report_data = await self.send_request(self, "heartbeat")
+        except (JsonRPCTimeout, JsonRPCError):
+            await self.application.hosts.update_host_state(self.host_id, state='TIMEOUT')
+            return
+
+        if report_data is None:
+            await self.application.hosts.update_host_state(self.host_id, state='ERROR')
+            return
+
+        report = HeartbeatReport(report_data)
+
+        if report.memory > HostHandler.MEMORY_OVERLOAD:
+            state = 'OVERLOAD'
+        else:
+            state = 'ACTIVE'
+
+        # update load in case of success
+        await self.application.hosts.update_host_load(self.host_id, report.memory, report.cpu, report.storage, state)
+
+        # delete rooms not listed in that list
+        await self.application.rooms.remove_host_rooms(self.host_id, except_rooms=report.rooms)
+
+    async def on_closed(self):
+        self.application.monitor_action("game.controller.connected", {"connected": 0}, host=self.host_address)
+
+        logging.info("Host {0} ({1}) disconnected".format(self.host_id, self.host_address))
+        if self.update_cb:
+            self.update_cb.stop()
+
+        if self.pub:
+            await self.pub.release()
+
+        if self.rpc_listener:
+            await self.application.rpc.stop_listening(self.rpc_listener)
+
+        await self.application.hosts.update_host_state(self.host_id, state='DOWN')
+
