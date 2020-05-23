@@ -965,8 +965,7 @@ class RoomsModel(Model):
                 "game_host_{0}".format(host.host_id),
                 "spawn", JSONRPC_TIMEOUT, game_name=game_id, game_version=game_version,
                 game_server_name=game_server_name,
-                room_id=room_id, gamespace=gamespace, deployment=deployment_id,
-                settings=settings)
+                room_id=room_id, deployment=deployment_id, settings=settings)
         except JsonRPCTimeout as e:
             raise RoomError("Failed to spawn a new game server (timeout)")
         except JsonRPCError as e:

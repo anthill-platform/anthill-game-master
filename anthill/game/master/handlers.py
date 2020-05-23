@@ -44,14 +44,6 @@ class InternalHandler(object):
         except HostError as e:
             raise InternalError(500, str(e))
 
-    async def controller_action(self, action, gamespace, room_id, args, kwargs):
-        try:
-            result = await self.application.ctl_client.received(gamespace, room_id, action, args, kwargs) or {}
-        except ControllerError as e:
-            raise InternalError(e.code, e.message)
-
-        return result
-
     async def issue_ban(self, gamespace, account, reason, expires):
         bans = self.application.bans
 
@@ -1276,6 +1268,16 @@ class HostHandler(JsonRPCWSHandler):
             "session_id": session_id,
             "kwargs": kwargs
         }, routing_key=str(session_id))
+
+    async def notify(self, notify_action=None, room_id=0, args=None, kwargs=None):
+        try:
+            result = await self.application.ctl_client.received(
+                self.token.get(AccessToken.GAMESPACE),
+                room_id, notify_action, args, kwargs) or {}
+        except ControllerError as e:
+            raise JsonRPCError(e.code, e.message)
+        else:
+            return result
 
     # noinspection PyUnusedLocal
     async def __on_rpc_receive__(self, context, method, *args, **kwargs):
