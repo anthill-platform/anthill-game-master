@@ -1173,26 +1173,38 @@ class DeployApplicationController(a.UploadAdminController):
 
         delivery = Delivery(self.application, self.gamespace)
 
-        if self.auto_switch:
-            result = await delivery.__deliver__(
-                game_name, game_version, self.deployment, deployment_hash,
-                wait_for_deliver=True)
+        nothing_to_deliver = False
 
-            if not result:
-                raise a.Redirect(
-                    "app_version",
-                    message="Failed to deliver deployment, cannot switch automatically",
-                    app_id=game_name,
-                    version_id=game_version)
+        if self.auto_switch:
+            try:
+                result = await delivery.__deliver__(
+                    game_name, game_version, self.deployment, deployment_hash,
+                    wait_for_deliver=True)
+            except a.ActionError as e:
+                if e.title == "Nothing to deliver":
+                    nothing_to_deliver = True
+                else:
+                    raise e
+            else:
+                if not result:
+                    raise a.Redirect(
+                        "app_version",
+                        message="Failed to deliver deployment, cannot switch automatically",
+                        app_id=game_name,
+                        version_id=game_version)
 
             await deployments.update_game_version_deployment(
                 self.gamespace, game_name, game_version, self.deployment, True)
         else:
             await delivery.__deliver__(game_name, game_version, self.deployment, deployment_hash)
 
+        message = "Game server has been deployed and switched"
+        if nothing_to_deliver:
+            message += " (nothing to deliver though)"
+
         raise a.Redirect(
             "app_version",
-            message="Game server has been deployed and switched"
+            message=message
             if self.auto_switch else "Game server has been deployed",
             app_id=game_name,
             version_id=game_version)
