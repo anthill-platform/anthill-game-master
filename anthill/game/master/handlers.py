@@ -1223,7 +1223,8 @@ class HostHandler(JsonRPCWSHandler):
         await self.send_rpc(self, "shutdown")
 
     async def on_rpc_spawn_received(self, *args, **kwargs):
-        return await self.send_request(self, "spawn", JSONRPC_TIMEOUT, *args, **kwargs)
+        # 60 seconds for spawn plus 10 for extra
+        return await self.send_request(self, "spawn", 70, *args, **kwargs)
 
     async def on_rpc_terminate_room_received(self, *args, **kwargs):
         return await self.send_request(self, "terminate_room", JSONRPC_TIMEOUT, *args, **kwargs)

@@ -83,7 +83,7 @@ class HostsPlayersCountAdapter(object):
     def __init__(self, data):
         self.players_count = int(data.get("players_count", 0))
         self.host_id = str(data.get("host_id"))
-        self.host_name = str(data.get("host_name"))
+        self.host_address = str(data.get("host_address"))
         self.host_region = str(data.get("host_region"))
         self.host_load = data.get("host_load")
         self.host_memory = data.get("host_memory")
@@ -265,7 +265,7 @@ class RoomQuery(object):
 
 
 class RoomsModel(Model):
-    AUTO_REMOVE_TIME = 30
+    AUTO_REMOVE_TIME = 60
 
     @staticmethod
     def __generate_key__(gamespace_id, account_id):
@@ -321,7 +321,7 @@ class RoomsModel(Model):
                     "cpu": host.host_cpu,
                     "storage": host.host_storage,
                 },
-                host_name=host.host_name,
+                host_address=host.host_address,
                 host_id=host.host_id)
 
     async def started(self, application):
@@ -961,9 +961,10 @@ class RoomsModel(Model):
             settings["other"] = other_settings
 
         try:
+            # 60 seconds for spawn plus 10 for extra
             result = await self.rpc.send_mq_request(
                 "game_host_{0}".format(host.host_id),
-                "spawn", JSONRPC_TIMEOUT, game_name=game_id, game_version=game_version,
+                "spawn", 70, game_name=game_id, game_version=game_version,
                 game_server_name=game_server_name,
                 room_id=room_id, deployment=deployment_id, settings=settings)
         except JsonRPCTimeout as e:
