@@ -2,7 +2,9 @@
 from setuptools import setup, find_namespace_packages
 
 DEPENDENCIES = [
-    "anthill-common>=0.2.5"
+    "anthill-common>=0.2.5",
+    "python-geoip-python3==1.3",
+    "python-geoip-geolite2-yplan",
 ]
 
 setup(
